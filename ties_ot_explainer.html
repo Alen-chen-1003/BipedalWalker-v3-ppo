@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TIES 與 OT 融合程式碼逐步講解</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F4F0;color:#1A1915;min-height:100vh;padding:24px}
+h1{font-size:18px;font-weight:600;margin-bottom:20px;color:#1A1915}
+.tabs{display:flex;gap:8px;margin-bottom:20px}
+.tab{padding:7px 18px;border:1px solid #D5D3CC;border-radius:6px;font-size:13px;cursor:pointer;background:#FFFFFF;color:#6B6960}
+.tab.on{background:#E8F0FB;color:#2563EB;border-color:#93B4F7;font-weight:500}
+.stepper{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.sbtn{padding:6px 14px;border:1px solid #D5D3CC;border-radius:6px;font-size:13px;cursor:pointer;background:#FFFFFF;color:#1A1915}
+.sbtn:hover:not(:disabled){background:#F0EEE8}
+.sbtn:disabled{opacity:0.3;cursor:default}
+.snum{font-size:13px;font-weight:500;color:#1A1915;min-width:48px;text-align:center}
+.panel{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.code-card{background:#2B2A27;border-radius:8px;padding:14px;overflow:hidden}
+.vis-card{background:#FFFFFF;border:1px solid #E5E3DB;border-radius:8px;padding:14px}
+.card-title{font-size:11px;font-weight:500;letter-spacing:.05em;margin-bottom:10px}
+.code-card .card-title{color:#999690}
+.vis-card .card-title{color:#999690}
+.code-block{font-family:'Consolas','Cascadia Code','Fira Code',monospace;font-size:11.5px;line-height:1.7}
+.cl{padding:2px 6px;border-radius:3px;cursor:default;display:block;color:#D4D0C4}
+.cl.hi{background:#1E3A5F;border-left:2px solid #4A9EFF;color:#E8F2FF}
+.kw{color:#C084FC}.fn{color:#F97316}.cm{color:#6B7280;font-style:italic}.nm{color:#FBBF24}.st{color:#34D399}
+.desc{font-size:12.5px;color:#444340;line-height:1.7;margin-bottom:12px}
+.desc code{font-family:'Consolas',monospace;font-size:11.5px;background:#F0EEE8;padding:1px 5px;border-radius:3px;color:#1A1915}
+.grids{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-top:6px}
+.mw{display:flex;flex-direction:column;align-items:center;gap:4px}
+.ml{font-size:10px;color:#888780;font-family:'Consolas',monospace}
+.mg{display:grid;gap:2px}
+.ce{width:40px;height:28px;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-family:'Consolas',monospace;border-radius:3px;font-weight:500}
+.c-d{background:#CECBF6;color:#3C3489}
+.c-m{background:#9FE1CB;color:#085041}
+.c-b{background:#D3D1C7;color:#444441}
+.c-tp{background:#C0DD97;color:#27500A}
+.c-tn{background:#F7C1C1;color:#791F1F}
+.c-z{background:#F1EFE8;color:#888780}
+.c-f{background:#B5D4F4;color:#0C447C}
+.c-a{background:#F4C0D1;color:#72243E}
+.c-hi{background:#FAC775;color:#633806}
+.hbox{border-left:3px solid #93B4F7;padding:7px 10px;background:#EEF4FF;border-radius:0 6px 6px 0;font-size:12px;color:#1E40AF;margin-top:10px;line-height:1.7;font-family:'Consolas',monospace}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<h1>TIES 與 OT 融合 — 程式碼搭配數值模擬逐步講解</h1>
+
+<div class="tabs">
+  <button class="tab on" onclick="sw('ties',this)">TIES 融合</button>
+  <button class="tab" onclick="sw('ot',this)">OT 融合</button>
+</div>
+
+<div id="p-ties">
+  <div class="stepper">
+    <button class="sbtn" id="tp" onclick="ts(-1)" disabled>上一步</button>
+    <span class="snum" id="tn">1 / 6</span>
+    <button class="sbtn" id="tn2" onclick="ts(1)">下一步</button>
+  </div>
+  <div class="panel">
+    <div class="code-card">
+      <div class="card-title">PYTHON 程式碼</div>
+      <div class="code-block" id="tc"></div>
+    </div>
+    <div class="vis-card">
+      <div class="card-title">數值模擬</div>
+      <div id="tv"></div>
+    </div>
+  </div>
+</div>
+
+<div id="p-ot" class="hidden">
+  <div class="stepper">
+    <button class="sbtn" id="op" onclick="os(-1)" disabled>上一步</button>
+    <span class="snum" id="on2">1 / 5</span>
+    <button class="sbtn" id="on3" onclick="os(1)">下一步</button>
+  </div>
+  <div class="panel">
+    <div class="code-card">
+      <div class="card-title">PYTHON 程式碼</div>
+      <div class="code-block" id="oc2"></div>
+    </div>
+    <div class="vis-card">
+      <div class="card-title">數值模擬</div>
+      <div id="ov"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const D=[[0.8,-0.3,0.5,-0.1],[0.2,0.7,-0.4,0.6],[-0.5,0.3,0.9,-0.2],[0.1,-0.6,0.3,0.8]];
+const M=[[-0.2,0.6,-0.7,0.4],[0.9,-0.1,0.3,-0.5],[0.4,-0.8,0.2,0.7],[-0.3,0.5,-0.1,0.9]];
+const f=v=>v.toFixed(2);
+
+function mat(data,types,label,n){
+  n=n||4;
+  let h='<div class="mw"><div class="ml">'+label+'</div><div class="mg" style="grid-template-columns:repeat('+n+',40px)">';
+  data.flat().forEach((v,i)=>{
+    const r=Math.floor(i/n),c2=i%n;
+    const t=Array.isArray(types)?types[r][c2]:types;
+    const cls=t==='d'?'c-d':t==='m'?'c-m':t==='b'?'c-b':t==='f'?'c-f':t==='a'?'c-a':t==='hi'?'c-hi':Math.abs(v)<0.005?'c-z':v>0?'c-tp':'c-tn';
+    h+='<div class="ce '+cls+'">'+f(v)+'</div>';
+  });
+  return h+'</div></div>';
+}
+
+function base2d(a,b){return a.map((r,i)=>r.map((v,j)=>(v+b[i][j])/2));}
+function sub2d(a,b){return a.map((r,i)=>r.map((v,j)=>v-b[i][j]));}
+function add2d(a,b){return a.map((r,i)=>r.map((v,j)=>v+b[i][j]));}
+
+const BASE=base2d(D,M);
+const TVD=sub2d(D,BASE);
+const TVM=sub2d(M,BASE);
+
+const flat=[...TVD.flat(),...TVM.flat()].map(Math.abs).sort((a,b)=>b-a);
+const thresh=flat[Math.floor(flat.length*0.5)-1]||0;
+const TRIMD=TVD.map(r=>r.map(v=>Math.abs(v)>=thresh?v:0));
+const TRIMM=TVM.map(r=>r.map(v=>Math.abs(v)>=thresh?v:0));
+
+const SIGN=BASE.map((r,i)=>r.map((_,j)=>{const s=TRIMD[i][j]+TRIMM[i][j];return s>=0?1:-1;}));
+const MGTV=BASE.map((r,i)=>r.map((_,j)=>{
+  const sg=SIGN[i][j];
+  const vs=[];
+  if(sg>0&&TRIMD[i][j]>0)vs.push(TRIMD[i][j]);
+  if(sg>0&&TRIMM[i][j]>0)vs.push(TRIMM[i][j]);
+  if(sg<0&&TRIMD[i][j]<0)vs.push(TRIMD[i][j]);
+  if(sg<0&&TRIMM[i][j]<0)vs.push(TRIMM[i][j]);
+  return vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:0;
+}));
+const FUSED=add2d(BASE,MGTV);
+
+const COST=D.map((rd,i)=>M.map((rm,j)=>rd.reduce((s,v,k)=>s+(v-rm[k])**2,0)));
+let best=1e9,PERM=[0,1,2,3];
+(function perm(a,l){
+  if(l===a.length){const c=a.reduce((s,j,i)=>s+COST[i][j],0);if(c<best){best=c;PERM=[...a];}return;}
+  for(let i=l;i<a.length;i++){[a[l],a[i]]=[a[i],a[l]];perm(a,l+1);[a[l],a[i]]=[a[i],a[l]];}
+})([0,1,2,3],0);
+const ALIGNED=PERM.map(j=>D[j]);
+const OFUSED=ALIGNED.map((r,i)=>r.map((v,j)=>(v+M[i][j])/2));
+const TMAT=D.map((_,i)=>M.map((_,j)=>PERM[j]===i?0.25:0));
+
+const tiesCode=[
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):',hi:true},
+    {t:'    shape = dad_block.shape'},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)'},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)'},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)'},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)'},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)'},
+    {t:'    merged = (base + merged_tv).reshape(shape)'},
+    {t:'    <span class="kw">return</span> merged'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):'},
+    {t:'    shape = dad_block.shape',hi:true},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()',hi:true},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()',hi:true},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)',hi:true},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)'},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)'},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)'},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)'},
+    {t:'    merged = (base + merged_tv).reshape(shape)'},
+    {t:'    <span class="kw">return</span> merged'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)'},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)',hi:true},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)',hi:true},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)'},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)'},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)'},
+    {t:'    merged = (base + merged_tv).reshape(shape)'},
+    {t:'    <span class="kw">return</span> merged'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)'},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)'},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)',hi:true},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)'},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)'},
+    {t:'    merged = (base + merged_tv).reshape(shape)'},
+    {t:'    <span class="kw">return</span> merged'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)'},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)'},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)'},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)',hi:true},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)',hi:true},
+    {t:'    merged = (base + merged_tv).reshape(shape)'},
+    {t:'    <span class="kw">return</span> merged'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ties_block</span>(dad_block, mom_block, k):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    d = dad_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    m = mom_block.reshape(<span class="nm">1</span>, -<span class="nm">1</span>).float()'},
+    {t:'    M = torch.cat([d, m], dim=<span class="nm">0</span>)'},
+    {t:'    base = M.mean(dim=<span class="nm">0</span>)'},
+    {t:'    tv = M - base.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    trimmed = <span class="fn">_topk_trim</span>(tv, k)'},
+    {t:'    sign = <span class="fn">_resolve_sign</span>(trimmed, <span class="st">"mass"</span>)'},
+    {t:'    merged_tv = <span class="fn">_disjoint_merge</span>(trimmed, sign, <span class="st">"mean"</span>)'},
+    {t:'    merged = (base + merged_tv).reshape(shape)',hi:true},
+    {t:'    <span class="kw">return</span> merged',hi:true},
+  ],
+];
+
+const tiesVis=[
+  {
+    desc:'函式接收 <code>dad_block</code>、<code>mom_block</code>（交叉通道區塊）和 <code>k=0.5</code>（保留比例）。以下用 4×4 矩陣模擬右上交叉通道。',
+    render:()=>'<div class="grids">'+mat(D,'d','dad_block')+mat(M,'m','mom_block')+'</div>'
+  },
+  {
+    desc:'<code>reshape(1,-1)</code> 把 4×4 展平成 1×16，<code>torch.cat</code> 沿 dim=0 堆成 2×16 的矩陣 M（第 0 行=dad，第 1 行=mom）。',
+    render:()=>'<div class="grids">'+mat(D,'d','dad_block（4×4）')+mat(M,'m','mom_block（4×4）')+'</div><div class="hbox">展平後 d.shape = (1,16)，m.shape = (1,16)<br>M = cat([d,m]) → shape (2,16)</div>'
+  },
+  {
+    desc:'<code>base = M.mean(dim=0)</code> 對 dad 和 mom 逐元素取平均，<code>tv = M - base</code> 計算每個模型偏離平均的量（task vector）。',
+    render:()=>'<div class="grids">'+mat(BASE,'b','base（平均）')+mat(TVD,TVD.map(r=>r.map(v=>Math.abs(v)<0.01?'z':v>0?'tp':'tn')),'tv_dad（偏移）')+'</div><div class="hbox">base[0][0] = ('+f(D[0][0])+'+'+f(M[0][0])+')/2 = '+f(BASE[0][0])+'<br>tv_dad[0][0] = '+f(D[0][0])+' - '+f(BASE[0][0])+' = '+f(TVD[0][0])+'</div>'
+  },
+  {
+    desc:'<code>_topk_trim(tv, k=0.5)</code> 只保留絕對值最大的 50%，其餘設為 0（灰色）。去掉小的噪音，只留重要的參數變動。',
+    render:()=>'<div class="grids">'+mat(TVD,TVD.map(r=>r.map(v=>Math.abs(v)<0.01?'z':v>0?'tp':'tn')),'tv_dad（trim 前）')+mat(TRIMD,TRIMD.map(r=>r.map(v=>Math.abs(v)<0.005?'z':v>0?'tp':'tn')),'trimmed_dad（trim 後）')+'</div><div class="hbox">threshold = '+f(thresh)+'，絕對值 ≥ '+f(thresh)+' 的參數保留，其餘→0</div>'
+  },
+  {
+    desc:'<b>Elect Sign（質量多數投票）</b>：每個位置分別加總所有模型中「正值的絕對值總和」vs「負值的絕對值總和」，哪邊質量大就選那個符號（+1 或 -1）。<br><b>Disjoint Merge</b>：只取與 elected sign 方向一致的 trimmed 值，取平均得到 merged_tv；方向衝突的直接忽略。',
+    render:()=>'<div class="grids">'+mat(SIGN,SIGN.map(r=>r.map(v=>v>0?'tp':'tn')),'sign矩陣')+mat(MGTV,MGTV.map(r=>r.map(v=>Math.abs(v)<0.005?'z':v>0?'tp':'tn')),'merged_tv')+'</div><div class="hbox">位置[0][0]：trim_d='+f(TRIMD[0][0])+' trim_m='+f(TRIMM[0][0])+'，加總='+f(TRIMD[0][0]+TRIMM[0][0])+'，sign='+SIGN[0][0]+'<br>merged_tv[0][0]='+f(MGTV[0][0])+'</div>'
+  },
+  {
+    desc:'<code>merged = base + merged_tv</code>，task vector 加回 base 還原成實際參數。<code>reshape(shape)</code> 還原回 4×4。這就是最終寫入 child 交叉通道的值。',
+    render:()=>'<div class="grids">'+mat(BASE,'b','base')+mat(MGTV,MGTV.map(r=>r.map(v=>Math.abs(v)<0.005?'z':v>0?'tp':'tn')),'merged_tv')+mat(FUSED,'f','fused（結果）')+'</div><div class="hbox">fused[0][0] = '+f(BASE[0][0])+' + '+f(MGTV[0][0])+' = '+f(FUSED[0][0])+'</div>'
+  },
+];
+
+const otCode=[
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ot_block</span>(dad_block, mom_block, eps=<span class="nm">1e-7</span>):',hi:true},
+    {t:'    shape = dad_block.shape'},
+    {t:'    n = shape[<span class="nm">0</span>]'},
+    {t:'    d = dad_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    m = mom_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    diff = d.unsqueeze(<span class="nm">1</span>) - m.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    C = (diff**<span class="nm">2</span>).sum(dim=-<span class="nm">1</span>).cpu().numpy()'},
+    {t:'    mu = np.ones(n)/n'},
+    {t:'    nu = np.ones(n)/n'},
+    {t:'    T = pot.<span class="fn">emd</span>(mu, nu, C)'},
+    {t:'    T_var = torch.from_numpy(T).float().to(d.device)'},
+    {t:'    marginals_beta = T_var.t() @ torch.ones(n)'},
+    {t:'    T_var = T_var * (<span class="nm">1.0</span>/(marginals_beta+eps))'},
+    {t:'    aligned_dad = T_var.t() @ d'},
+    {t:'    fused = <span class="nm">0.5</span>*(aligned_dad+m)'},
+    {t:'    <span class="kw">return</span> fused.reshape(shape).to(dad_block.dtype)'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ot_block</span>(dad_block, mom_block, eps=<span class="nm">1e-7</span>):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    n = shape[<span class="nm">0</span>]'},
+    {t:'    d = dad_block.float().reshape(n, -<span class="nm">1</span>)',hi:true},
+    {t:'    m = mom_block.float().reshape(n, -<span class="nm">1</span>)',hi:true},
+    {t:'    diff = d.unsqueeze(<span class="nm">1</span>) - m.unsqueeze(<span class="nm">0</span>)',hi:true},
+    {t:'    C = (diff**<span class="nm">2</span>).sum(dim=-<span class="nm">1</span>).cpu().numpy()',hi:true},
+    {t:'    mu = np.ones(n)/n'},
+    {t:'    nu = np.ones(n)/n'},
+    {t:'    T = pot.<span class="fn">emd</span>(mu, nu, C)'},
+    {t:'    T_var = torch.from_numpy(T).float().to(d.device)'},
+    {t:'    marginals_beta = T_var.t() @ torch.ones(n)'},
+    {t:'    T_var = T_var * (<span class="nm">1.0</span>/(marginals_beta+eps))'},
+    {t:'    aligned_dad = T_var.t() @ d'},
+    {t:'    fused = <span class="nm">0.5</span>*(aligned_dad+m)'},
+    {t:'    <span class="kw">return</span> fused.reshape(shape).to(dad_block.dtype)'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ot_block</span>(dad_block, mom_block, eps=<span class="nm">1e-7</span>):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    n = shape[<span class="nm">0</span>]'},
+    {t:'    d = dad_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    m = mom_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    diff = d.unsqueeze(<span class="nm">1</span>) - m.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    C = (diff**<span class="nm">2</span>).sum(dim=-<span class="nm">1</span>).cpu().numpy()'},
+    {t:'    mu = np.ones(n)/n',hi:true},
+    {t:'    nu = np.ones(n)/n',hi:true},
+    {t:'    T = pot.<span class="fn">emd</span>(mu, nu, C)',hi:true},
+    {t:'    T_var = torch.from_numpy(T).float().to(d.device)',hi:true},
+    {t:'    marginals_beta = T_var.t() @ torch.ones(n)'},
+    {t:'    T_var = T_var * (<span class="nm">1.0</span>/(marginals_beta+eps))'},
+    {t:'    aligned_dad = T_var.t() @ d'},
+    {t:'    fused = <span class="nm">0.5</span>*(aligned_dad+m)'},
+    {t:'    <span class="kw">return</span> fused.reshape(shape).to(dad_block.dtype)'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ot_block</span>(dad_block, mom_block, eps=<span class="nm">1e-7</span>):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    n = shape[<span class="nm">0</span>]'},
+    {t:'    d = dad_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    m = mom_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    diff = d.unsqueeze(<span class="nm">1</span>) - m.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    C = (diff**<span class="nm">2</span>).sum(dim=-<span class="nm">1</span>).cpu().numpy()'},
+    {t:'    mu = np.ones(n)/n'},
+    {t:'    nu = np.ones(n)/n'},
+    {t:'    T = pot.<span class="fn">emd</span>(mu, nu, C)'},
+    {t:'    T_var = torch.from_numpy(T).float().to(d.device)'},
+    {t:'    marginals_beta = T_var.t() @ torch.ones(n)',hi:true},
+    {t:'    T_var = T_var * (<span class="nm">1.0</span>/(marginals_beta+eps))',hi:true},
+    {t:'    aligned_dad = T_var.t() @ d',hi:true},
+    {t:'    fused = <span class="nm">0.5</span>*(aligned_dad+m)'},
+    {t:'    <span class="kw">return</span> fused.reshape(shape).to(dad_block.dtype)'},
+  ],
+  [
+    {t:'<span class="kw">def</span> <span class="fn">_ot_block</span>(dad_block, mom_block, eps=<span class="nm">1e-7</span>):'},
+    {t:'    shape = dad_block.shape'},
+    {t:'    n = shape[<span class="nm">0</span>]'},
+    {t:'    d = dad_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    m = mom_block.float().reshape(n, -<span class="nm">1</span>)'},
+    {t:'    diff = d.unsqueeze(<span class="nm">1</span>) - m.unsqueeze(<span class="nm">0</span>)'},
+    {t:'    C = (diff**<span class="nm">2</span>).sum(dim=-<span class="nm">1</span>).cpu().numpy()'},
+    {t:'    mu = np.ones(n)/n'},
+    {t:'    nu = np.ones(n)/n'},
+    {t:'    T = pot.<span class="fn">emd</span>(mu, nu, C)'},
+    {t:'    T_var = torch.from_numpy(T).float().to(d.device)'},
+    {t:'    marginals_beta = T_var.t() @ torch.ones(n)'},
+    {t:'    T_var = T_var * (<span class="nm">1.0</span>/(marginals_beta+eps))'},
+    {t:'    aligned_dad = T_var.t() @ d'},
+    {t:'    fused = <span class="nm">0.5</span>*(aligned_dad+m)',hi:true},
+    {t:'    <span class="kw">return</span> fused.reshape(shape).to(dad_block.dtype)',hi:true},
+  ],
+];
+
+const otVis=[
+  {
+    desc:'函式接收 <code>dad_block</code>、<code>mom_block</code>（交叉通道區塊）。每一行代表一顆輸出神經元的權重向量。目標是找到 dad 和 mom 神經元之間的最佳配對再平均。',
+    render:()=>'<div class="grids">'+mat(D,'d','dad_block（4顆神經元）')+mat(M,'m','mom_block（4顆神經元）')+'</div>'
+  },
+  {
+    desc:'<code>d.unsqueeze(1)-m.unsqueeze(0)</code> 一次計算所有 (i,j) 對的差值，<code>(diff**2).sum(dim=-1)</code> 得到 Cost Matrix C，<code>C[i][j]</code> = dad 第 i 顆和 mom 第 j 顆神經元有多不像。',
+    render:()=>{
+      const cTypes=COST.map((r,i)=>r.map((_,j)=>PERM[j]===i?'hi':'b'));
+      return '<div class="grids">'+mat(COST,cTypes,'Cost Matrix C（橘=最優配對）')+'</div>'+
+        '<div class="hbox">C[0][j] = ||dad[0]-mom[j]||²<br>最小成本配對：dad→mom 順序 = ['+PERM.join(',')+']</div>';
+    }
+  },
+  {
+    desc:'<code>ot.emd(mu, nu, C)</code> 求精確最優傳輸。均勻分布下 T 近似置換矩陣，T[i][j]=0.25 代表 dad 第 i 顆對應 mom 第 j 顆。Column normalize 後每列加總=1。',
+    render:()=>{
+      const tTypes=TMAT.map((r,i)=>r.map((v,j)=>v>0?'hi':'b'));
+      return '<div class="grids">'+mat(TMAT,tTypes,'Transport map T（橘=有質量）')+'</div>'+
+        '<div class="hbox">T[i][j]=0.25 → 正規化後 T_var[i][j]=1.0（pure permutation）<br>等效於：把 dad['+PERM[0]+'] 移到位置 0，dad['+PERM[1]+'] 移到位置 1...</div>';
+    }
+  },
+  {
+    desc:'<code>T_var.t() @ d</code>：根據傳輸矩陣重排 dad 的神經元。aligned_dad[j] = 跟 mom[j] 最相似的 dad 神經元，現在兩者在同一個「位置」上才有意義平均。',
+    render:()=>'<div class="grids">'+mat(D,'d','原始 dad')+mat(ALIGNED,'a','aligned_dad（重排後）')+mat(M,'m','mom（對照）')+'</div>'+
+      '<div class="hbox">重排：dad 第 '+PERM[0]+' 行 → 位置 0，dad 第 '+PERM[1]+' 行 → 位置 1<br>aligned_dad[0] ≈ mom[0]（最相似的配對）</div>'
+  },
+  {
+    desc:'<code>fused = 0.5*(aligned_dad + mom)</code>，對齊後的 dad 和 mom 語義對應，直接平均。這個結果寫入 child 的交叉通道 <code>W[:oh, ih:]</code> 或 <code>W[oh:, :ih]</code>。',
+    render:()=>'<div class="grids">'+mat(ALIGNED,'a','aligned_dad')+mat(M,'m','mom')+mat(OFUSED,'f','fused（最終）')+'</div>'+
+      '<div class="hbox">fused[0][0] = ('+f(ALIGNED[0][0])+'+'+f(M[0][0])+')/2 = '+f(OFUSED[0][0])+'</div>'
+  },
+];
+
+let ti=0,oi=0;
+
+function renderCode(lines,el){
+  el.innerHTML=lines.map(l=>'<span class="cl'+(l.hi?' hi':'')+'" >'+l.t+'</span>').join('');
+}
+
+function renderTies(){
+  renderCode(tiesCode[ti],document.getElementById('tc'));
+  const v=tiesVis[ti];
+  document.getElementById('tv').innerHTML='<div class="desc">'+v.desc+'</div>'+v.render();
+  document.getElementById('tn').textContent=(ti+1)+' / '+tiesVis.length;
+  document.getElementById('tp').disabled=ti===0;
+  document.getElementById('tn2').disabled=ti===tiesVis.length-1;
+}
+
+function renderOt(){
+  renderCode(otCode[oi],document.getElementById('oc2'));
+  const v=otVis[oi];
+  document.getElementById('ov').innerHTML='<div class="desc">'+v.desc+'</div>'+v.render();
+  document.getElementById('on2').textContent=(oi+1)+' / '+otVis.length;
+  document.getElementById('op').disabled=oi===0;
+  document.getElementById('on3').disabled=oi===otVis.length-1;
+}
+
+function ts(d){ti=Math.max(0,Math.min(tiesVis.length-1,ti+d));renderTies();}
+function os(d){oi=Math.max(0,Math.min(otVis.length-1,oi+d));renderOt();}
+
+function sw(mode,el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('p-ties').classList.toggle('hidden',mode!=='ties');
+  document.getElementById('p-ot').classList.toggle('hidden',mode!=='ot');
+}
+
+renderTies();
+renderOt();
+</script>
+</body>
+</html>

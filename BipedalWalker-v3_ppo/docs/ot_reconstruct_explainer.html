@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>reconstruct_ot_initialize_crosstalk 逐步詳解</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a24; --panel2:#1d2130; --border:#2a2f42;
+    --text:#e6e8f0; --muted:#9aa1b8; --accent:#7dd3fc; --accent2:#f0abfc;
+    --dad:#60a5fa; --mom:#f472b6; --pure:#34d399; --cross:#fbbf24;
+    --code-bg:#0b0d13; --warn:#f87171; --ok:#4ade80;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;
+    background:radial-gradient(circle at 20% 0%, #1a1f30 0%, var(--bg) 55%);
+    color:var(--text); line-height:1.75; padding-bottom:80px;
+  }
+  header{
+    padding:64px 24px 40px; text-align:center;
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, rgba(125,211,252,0.08), transparent);
+  }
+  header h1{
+    font-size:2.1rem; margin:0 0 12px; letter-spacing:0.5px;
+    background:linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header p{color:var(--muted); max-width:680px; margin:0 auto; font-size:1.02rem;}
+  nav{
+    display:flex; flex-wrap:wrap; justify-content:center; gap:10px;
+    max-width:1000px; margin:28px auto 0; padding:0 16px;
+  }
+  nav a{
+    color:var(--muted); text-decoration:none; font-size:0.88rem;
+    padding:7px 14px; border:1px solid var(--border); border-radius:999px;
+    transition:all .15s;
+  }
+  nav a:hover{color:var(--accent); border-color:var(--accent);}
+
+  main{max-width:920px; margin:0 auto; padding:0 20px;}
+  section{margin-top:64px;}
+  section h2{
+    font-size:1.5rem; margin-bottom:6px; display:flex; align-items:center; gap:10px;
+  }
+  .tag{
+    font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:6px;
+    letter-spacing:0.5px; text-transform:uppercase;
+  }
+  .tag.dad{background:rgba(96,165,250,0.15); color:var(--dad); border:1px solid rgba(96,165,250,0.4);}
+  .tag.mom{background:rgba(244,114,182,0.15); color:var(--mom); border:1px solid rgba(244,114,182,0.4);}
+  .subtitle{color:var(--muted); margin-bottom:22px; font-size:0.95rem;}
+
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:22px 24px; margin-bottom:18px;
+  }
+  .card h3{margin-top:0; font-size:1.05rem; color:var(--accent);}
+  .card.warn{border-color:rgba(248,113,113,0.4); background:rgba(248,113,113,0.06);}
+  .card.warn h3{color:var(--warn);}
+  .card.ok{border-color:rgba(74,222,128,0.35); background:rgba(74,222,128,0.05);}
+
+  code, pre{font-family:"Cascadia Code","Consolas",monospace;}
+  code.inline{
+    background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:5px;
+    font-size:0.86rem; color:var(--accent);
+  }
+  .kw{color:#c792ea;} .fn{color:#82aaff;} .str{color:#c3e88d;} .cm{color:#697098; font-style:italic;} .num{color:#f78c6c;}
+
+  /* matrix visuals */
+  .quad-wrap{display:flex; justify-content:center; margin:26px 0;}
+  table.qmat{border-collapse:separate; border-spacing:3px; font-size:0.85rem;}
+  table.qmat td{
+    width:88px; height:60px; text-align:center; border-radius:8px;
+    vertical-align:middle; padding:4px; font-weight:600;
+  }
+  .q-pure-dad{background:rgba(96,165,250,0.18); border:1.5px solid var(--dad); color:var(--dad);}
+  .q-pure-mom{background:rgba(244,114,182,0.18); border:1.5px solid var(--mom); color:var(--mom);}
+  .q-cross-md{background:rgba(251,191,36,0.16); border:1.5px dashed var(--cross); color:var(--cross);}
+  .q-cross-dm{background:rgba(251,191,36,0.16); border:1.5px dashed var(--cross); color:var(--cross);}
+  .qmat small{display:block; font-weight:400; opacity:0.8; font-size:0.72rem; margin-top:2px;}
+
+  .legend{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; font-size:0.82rem; color:var(--muted); margin-top:10px;}
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .dot{width:11px; height:11px; border-radius:3px; display:inline-block;}
+
+  .steps{counter-reset:step;}
+  .step{
+    position:relative; padding:20px 22px 20px 58px; margin-bottom:16px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:12px;
+  }
+  .step::before{
+    counter-increment:step; content:counter(step);
+    position:absolute; left:16px; top:20px; width:28px; height:28px;
+    border-radius:50%; background:linear-gradient(135deg, var(--accent), var(--accent2));
+    color:#0f1117; font-weight:800; display:flex; align-items:center; justify-content:center;
+    font-size:0.9rem;
+  }
+  .step h4{margin:0 0 8px; font-size:1rem;}
+
+  table.data{
+    width:100%; border-collapse:collapse; font-size:0.85rem; margin:14px 0;
+  }
+  table.data th, table.data td{
+    border:1px solid var(--border); padding:8px 10px; text-align:center;
+  }
+  table.data th{background:rgba(255,255,255,0.04); color:var(--muted); font-weight:600;}
+  .matnum{font-family:"Cascadia Code",monospace;}
+
+  .formula{
+    text-align:center; font-size:1.05rem; padding:16px; background:var(--code-bg);
+    border-radius:10px; border:1px solid var(--border); margin:16px 0;
+    font-family:"Cascadia Code",monospace; color:var(--accent);
+  }
+  .formula .op{color:var(--muted);}
+
+  .tabs{display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;}
+  .tabbtn{
+    background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+    padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem;
+    transition:all .15s;
+  }
+  .tabbtn.active{background:rgba(125,211,252,0.15); border-color:var(--accent); color:var(--accent);}
+  .tabpanel{display:none;}
+  .tabpanel.active{display:block;}
+
+  .flow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; margin:18px 0;}
+  .flow .node{
+    background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+    padding:10px 16px; font-size:0.85rem; text-align:center;
+  }
+  .flow .arrow{color:var(--muted); font-size:1.2rem;}
+
+  footer{
+    text-align:center; color:var(--muted); font-size:0.8rem; margin-top:80px; padding:20px;
+    border-top:1px solid var(--border);
+  }
+  .toc-scroll{scroll-margin-top:20px;}
+
+  /* line-numbered code blocks */
+  .codebox{
+    background:var(--code-bg); border:1px solid var(--border); border-radius:10px;
+    overflow-x:auto; margin:14px 0; font-size:0.83rem;
+  }
+  .codebox .filebar{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 14px; border-bottom:1px solid var(--border);
+    color:var(--muted); font-size:0.75rem; background:rgba(255,255,255,0.02);
+  }
+  .codebox .filebar b{color:var(--accent);}
+  .codebox table{border-collapse:collapse; width:100%;}
+  .codebox td{padding:1px 10px; white-space:pre; vertical-align:top;}
+  .codebox td.ln{
+    color:#4b5170; text-align:right; user-select:none; width:1%;
+    padding-right:14px; border-right:1px solid var(--border);
+  }
+  .codebox tr.hl{background:rgba(125,211,252,0.09);}
+  .codebox tr.hl td.ln{color:var(--accent); font-weight:700;}
+
+  .cmp-table td, .cmp-table th{font-size:0.83rem;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>reconstruct_ot_initialize_crosstalk</h1>
+  <p>「重建被截肢的另一半」交叉通道初始化 — 逐行程式碼 + 具體數字例子完整拆解</p>
+</header>
+
+<nav>
+  <a href="#concept">核心比喻：截肢與重建</a>
+  <a href="#formula">重建公式怎麼來的</a>
+  <a href="#walkthrough">逐步拆解（對應真實行號）</a>
+  <a href="#example">完整數字例子</a>
+  <a href="#code">完整原始程式碼</a>
+  <a href="#compare">跟 recursive_ot 的差異</a>
+  <a href="#caveats">已知限制</a>
+</nav>
+
+<main>
+
+<section id="concept" class="toc-scroll">
+  <h2>1. 核心比喻：截肢與重建</h2>
+  <p class="subtitle">跟 recursive_ot 的「翻譯+平均」思路不同，reconstruct_ot 想的是「把被拿掉的東西補回來」</p>
+
+  <div class="card">
+    <p>在 dad <b>自己</b> 的原生網路裡，第 ℓ 層上半神經元的輸出是：</p>
+    <div class="formula">dad輸出[i] <span class="op">=</span> W<sub>d</sub>[i,:ih] @ h<sub>dad上半</sub> <span class="op">+</span> W<sub>d</sub>[i,ih:] @ h<sub>dad下半</sub></div>
+    <p><code class="inline">Wd[:oh, ih:]</code>（四象限的右上角）在 dad 自己的網路裡<b>本來就有真實功能</b>——它負責處理 dad 自己的下半神經元。</p>
+  </div>
+
+  <div class="card warn">
+    <h3>拼接瞬間發生的事</h3>
+    <p><code class="inline">create_dual_channel_policy</code> 把子代前一層的下半，換成了 mom 的神經元。這一瞬間，<b>dad 上半神經元賴以生存的「dad 下半」被截肢了</b>——右上角那塊權重還在，但它面對的輸入已經不是它認識的東西。</p>
+  </div>
+
+  <div class="card ok">
+    <h3>重建的想法</h3>
+    <p>如果能找到一個翻譯矩陣，把「mom 下半的訊號」翻譯成「dad 自己下半原本該有的樣子」，那麼 dad 自己的右上區塊權重就<b>可以繼續正常運作</b>——不是「融合」父母，而是「修復」dad 原本被截斷的迴路。</p>
+  </div>
+</section>
+
+<section id="formula" class="toc-scroll">
+  <h2>2. 重建公式怎麼推出來的</h2>
+
+  <p>要讓 dad 上半神經元<b>完全不崩</b>，交叉通道 X_md 必須滿足：</p>
+  <div class="formula">X_md @ h<sub>mom下半</sub> <span class="op">≈</span> W<sub>d</sub>[:oh, ih:] @ h<sub>dad下半</sub></div>
+  <p style="color:var(--muted); font-size:0.88rem;">左邊是「子代實際會算出來的東西」，右邊是「dad 自己原本會算出來的東西」——目標是讓兩者盡量相等。</p>
+
+  <p>如果有一個傳輸矩陣 T<sub>bb</sub> 能把「mom 下半的激活」翻譯成「dad 下半的激活」（T<sub>bb</sub> @ h<sub>mom下半</sub> ≈ h<sub>dad下半</sub>），代入上式：</p>
+  <div class="formula" style="color:var(--ok)">X_md <span class="op">=</span> W<sub>d</sub>[:oh, ih:] · T<sub>bb</sub></div>
+
+  <div class="quad-wrap">
+    <table class="qmat">
+      <tr>
+        <td class="q-pure-dad">W<sub>dd</sub><small>不動</small></td>
+        <td class="q-cross-md">X_md = W<sub>d</sub>[:oh,ih:]·T<sub>bb</sub><small>dad 自己的右上區塊 × T_bb</small></td>
+      </tr>
+      <tr>
+        <td class="q-cross-dm">X_dm = W<sub>m</sub>[oh:,:ih]·T<sub>tt</sub><small>mom 自己的左下區塊 × T_tt</small></td>
+        <td class="q-pure-mom">W<sub>mm</sub><small>不動</small></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>T_bb 跟 T_tt 各自比對誰</h3>
+    <ul>
+      <li><b>T_bb</b>（重建 X_md 用）：比對「dad 自己下半」vs「mom 自己下半」——兩邊都是「母系血統」的神經元，角色對得上</li>
+      <li><b>T_tt</b>（重建 X_dm 用）：比對「dad 自己上半」vs「mom 自己上半」——兩邊都是「父系血統」的神經元</li>
+    </ul>
+  </div>
+
+  <div class="card warn">
+    <h3>跟 recursive_ot 最大的不同：沒有平均</h3>
+    <p>這是<b>重建單一血統的訊號</b>，不是融合兩個血統——最終寫入的值只跟 dad（或 mom）自己有關，不會拿去跟對方平均。</p>
+  </div>
+</section>
+
+<section id="walkthrough" class="toc-scroll">
+  <h2>3. 逐步拆解（對應真實行號）</h2>
+  <p class="subtitle">每一步都附上 <code class="inline">BipedalWalker-v3.py</code> 的原始程式碼與確切行號</p>
+
+  <div class="steps">
+    <div class="step">
+      <h4>Step 0 — 準備對齊依據（第 2402 ~ 2412 行）</h4>
+      <p>跟 recursive_ot 完全一樣的機制：有 <code class="inline">env</code> 就蒐集真實觀測、跑 dad/mom 各自完整原生前向傳播，記錄每層真實反應。</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2402–2412</b></div>
+        <table>
+          <tr><td class="ln">2402</td><td>    use_acts = <span class="kw">False</span></td></tr>
+          <tr><td class="ln">2403</td><td>    dad_acts_by_layer = mom_acts_by_layer = <span class="kw">None</span></td></tr>
+          <tr class="hl"><td class="ln">2404</td><td>    <span class="kw">if</span> obs_batch <span class="kw">is</span> <span class="kw">None</span> <span class="kw">and</span> env <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:</td></tr>
+          <tr class="hl"><td class="ln">2405</td><td>        obs_batch = <span class="fn">_sample_observations</span>(env, n_samples=n_obs_samples)</td></tr>
+          <tr class="hl"><td class="ln">2406</td><td>    <span class="kw">if</span> obs_batch <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:</td></tr>
+          <tr class="hl"><td class="ln">2407</td><td>        dad_acts_by_layer = <span class="fn">_collect_pure_activations</span>(dad_policy, obs_batch, layer_names)</td></tr>
+          <tr class="hl"><td class="ln">2408</td><td>        mom_acts_by_layer = <span class="fn">_collect_pure_activations</span>(mom_policy, obs_batch, layer_names)</td></tr>
+          <tr><td class="ln">2409</td><td>        use_acts = <span class="kw">True</span></td></tr>
+          <tr><td class="ln">2410</td><td>        <span class="fn">print</span>(<span class="str">f"[Reconstruct OT] 使用 activation-based 對齊（{obs_batch.shape[0]} 筆真實觀測）"</span>)</td></tr>
+          <tr><td class="ln">2411</td><td>    <span class="kw">else</span>:</td></tr>
+          <tr><td class="ln">2412</td><td>        <span class="fn">print</span>(<span class="str">"[Reconstruct OT] 未提供 env/obs_batch，退回 weight-based 對齊"</span>)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="step">
+      <h4>Step 1 — 第一層：完全不動（第 2429 ~ 2432 行）</h4>
+      <p>第一層輸入是共用觀測值，沒有「上半/下半」語意，<code class="inline">create_dual_channel_policy</code> 拼接時放的原始值本來就是精確解——這裡<b>直接 <code class="inline">continue</code>，完全不覆寫</b>。（回顧：recursive_ot 在第一層會複製 <code class="inline">Wd_pure</code> 進去，reconstruct_ot 認為那其實是覆寫壞了一個本來精確的值，所以刻意不動。）</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2429–2432</b></div>
+        <table>
+          <tr class="hl"><td class="ln">2429</td><td>        <span class="kw">if</span> i == <span class="num">0</span>:</td></tr>
+          <tr><td class="ln">2430</td><td class="cm">            # 第一層：輸入是共用觀測值，create_dual_channel_policy 放的原始值已是精確解，不動</td></tr>
+          <tr><td class="ln">2431</td><td>            <span class="fn">print</span>(<span class="str">f"  [{name}] 第一層，維持原始拼接值（精確解，不需翻譯）"</span>)</td></tr>
+          <tr class="hl"><td class="ln">2432</td><td>            <span class="kw">continue</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="step">
+      <h4>Step 2 — 深層：各自獨立算 T_bb / T_tt（第 2436 ~ 2445 行）</h4>
+      <p>跟 recursive_ot 不同，這裡<b>每層獨立算</b>，不用逐層傳遞——因為直接拿 dad_policy / mom_policy 各自完整原生前向傳播「這一層自己」的真實反應來比對：</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2436–2445</b></div>
+        <table>
+          <tr><td class="ln">2436</td><td>        <span class="kw">if</span> use_acts:</td></tr>
+          <tr class="hl"><td class="ln">2437</td><td>            dad_bottom = dad_acts_by_layer[name][:, oh:]   <span class="cm"># dad 自己下半的真實反應</span></td></tr>
+          <tr class="hl"><td class="ln">2438</td><td>            mom_bottom = mom_acts_by_layer[name][:, oh:]   <span class="cm"># mom 自己下半的真實反應</span></td></tr>
+          <tr><td class="ln">2439</td><td>            dad_top    = dad_acts_by_layer[name][:, :oh]   <span class="cm"># dad 自己上半的真實反應</span></td></tr>
+          <tr><td class="ln">2440</td><td>            mom_top    = mom_acts_by_layer[name][:, :oh]   <span class="cm"># mom 自己上半的真實反應</span></td></tr>
+          <tr class="hl"><td class="ln">2441</td><td>            T_bb = <span class="fn">_compute_layer_transport_from_acts</span>(dad_bottom, mom_bottom).to(W.device)</td></tr>
+          <tr><td class="ln">2442</td><td>            T_tt = <span class="fn">_compute_layer_transport_from_acts</span>(dad_top, mom_top).to(W.device)</td></tr>
+          <tr><td class="ln">2443</td><td>        <span class="kw">else</span>:</td></tr>
+          <tr class="hl"><td class="ln">2444</td><td>            T_bb = <span class="fn">_compute_layer_transport</span>(Wd[oh:, ih:], Wm[oh:, ih:])</td></tr>
+          <tr><td class="ln">2445</td><td>            T_tt = <span class="fn">_compute_layer_transport</span>(Wd[:oh, :ih], Wm[:oh, :ih])</td></tr>
+        </table>
+      </div>
+      <p style="color:var(--muted); font-size:0.88rem;">weight-based 備援：<code class="inline">Wd[oh:,ih:]</code> 是 dad 自己下半的<b>純通道</b>（右下），<code class="inline">Wm[oh:,ih:]</code> 是 mom 自己下半的純通道——兩塊都是各自「母系血統」的乾淨身分依據。</p>
+    </div>
+
+    <div class="step">
+      <h4>Step 3 — 用 T_bb / T_tt 重建，直接寫入（不平均）（第 2447 ~ 2451 行）</h4>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2447–2451</b></div>
+        <table>
+          <tr class="hl"><td class="ln">2447</td><td>        Wd_cross = Wd[:oh, ih:].float()   <span class="cm"># dad 自己原生的右上交叉區塊</span></td></tr>
+          <tr class="hl"><td class="ln">2448</td><td>        Wm_cross = Wm[oh:, :ih].float()   <span class="cm"># mom 自己原生的左下交叉區塊</span></td></tr>
+          <tr><td class="ln">2449</td><td></td></tr>
+          <tr class="hl"><td class="ln">2450</td><td>        W[:oh, ih:] = (Wd_cross @ T_bb.to(Wd_cross.device)).to(W.dtype)</td></tr>
+          <tr class="hl"><td class="ln">2451</td><td>        W[oh:, :ih] = (Wm_cross @ T_tt.to(Wm_cross.device)).to(W.dtype)</td></tr>
+        </table>
+      </div>
+      <p style="color:var(--muted); font-size:0.88rem;">沒有 <code class="inline">0.5 * (... + ...)</code> 這種平均步驟——這裡的邏輯是「重建」，寫入的值單純只是 dad（或 mom）自己被翻譯過的訊號。</p>
+    </div>
+  </div>
+</section>
+
+<section id="example" class="toc-scroll">
+  <h2>4. 完整數字例子（第 2 層，每半層 2 顆神經元）</h2>
+  <p class="subtitle">玩具尺寸 oh = ih = 2，只示範 X_md 這條鏈（X_dm 用完全對稱的方式算）</p>
+
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="r1">第一層（跳過）</button>
+    <button class="tabbtn" data-tab="r2">算 T_bb</button>
+    <button class="tabbtn" data-tab="r3">重建 X_md</button>
+  </div>
+
+  <div class="tabpanel active" id="r1">
+    <div class="card">
+      <h3>i == 0</h3>
+      <p>迴圈直接 <code class="inline">continue</code>，子代第一層的 <code class="inline">X_md</code>、<code class="inline">X_dm</code> 維持 <code class="inline">create_dual_channel_policy</code> 當初拼接的原始值——也就是 <code class="inline">Wd[:oh, ih:]</code> 與 <code class="inline">Wm[oh:, :ih]</code> 本身，完全沒有被任何函式碰過。</p>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="r2">
+    <div class="card">
+      <h3>第 2 層：dad / mom 自己下半的純通道（母系血統）</h3>
+      <table class="data">
+        <tr><th></th><th>W<sub>d</sub>[oh:,ih:]（dad 自己下半）</th><th>W<sub>m</sub>[oh:,ih:]（mom 自己下半）</th></tr>
+        <tr><td class="matnum">神經元 A / X</td><td class="matnum">[0.40, -0.20]</td><td class="matnum">[0.05, 0.55]</td></tr>
+        <tr><td class="matnum">神經元 B / Y</td><td class="matnum">[0.10, 0.50]</td><td class="matnum">[0.45, -0.15]</td></tr>
+      </table>
+      <p>距離矩陣：</p>
+      <table class="data">
+        <tr><th>C</th><th>mom-X [0.05,0.55]</th><th>mom-Y [0.45,-0.15]</th></tr>
+        <tr><td>dad-A [0.40,-0.20]</td><td class="matnum">0.685</td><td class="matnum">0.005</td></tr>
+        <tr><td>dad-B [0.10, 0.50]</td><td class="matnum">0.005</td><td class="matnum">0.545</td></tr>
+      </table>
+      <p>照順序總成本 0.5×(0.685+0.545)=0.615，交叉配對總成本 0.5×(0.005+0.005)=0.005 —— OT 選交叉配對：</p>
+      <div class="formula">T_bb <span class="op">=</span> [[0, 1], [1, 0]]</div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="r3">
+    <div class="card">
+      <h3>dad 自己原生的右上交叉區塊</h3>
+      <div class="formula">W<sub>d</sub>[:oh, ih:] <span class="op">=</span> [[0.70, 0.30], [-0.10, 0.60]]</div>
+
+      <h3>套用 T_bb 重建</h3>
+      <div class="formula">X_md <span class="op">=</span> W<sub>d</sub>[:oh, ih:] · T_bb</div>
+      <table class="data">
+        <tr><th></th><th>計算</th><th>結果</th></tr>
+        <tr><td>row 0</td><td class="matnum">[0.7,0.3]@[[0,1],[1,0]] = [0.3, 0.7]</td><td class="matnum" style="color:var(--ok)">[0.30, 0.70]</td></tr>
+        <tr><td>row 1</td><td class="matnum">[-0.1,0.6]@[[0,1],[1,0]] = [0.6, -0.1]</td><td class="matnum" style="color:var(--ok)">[0.60, -0.10]</td></tr>
+      </table>
+      <div class="formula" style="color:var(--ok)">X_md（Layer 2） <span class="op">=</span> [[0.30, 0.70], [0.60, -0.10]]</div>
+      <p>這就是最終寫進子代第 2 層 <code class="inline">X_md</code> 的值——沒有跟任何 mom 的東西平均，純粹是「dad 自己的右上區塊權重，接上翻譯過的 mom 下半訊號」。</p>
+    </div>
+  </div>
+</section>
+
+<section id="code" class="toc-scroll">
+  <h2>5. 完整原始程式碼（逐字轉錄）</h2>
+  <div class="codebox">
+    <div class="filebar"><span>BipedalWalker-v3.py</span><b>reconstruct_ot_initialize_crosstalk — L2364–2453</b></div>
+    <table>
+      <tr><td class="ln">2364</td><td><span class="kw">@torch.no_grad()</span></td></tr>
+      <tr><td class="ln">2365</td><td><span class="kw">def</span> <span class="fn">reconstruct_ot_initialize_crosstalk</span>(</td></tr>
+      <tr><td class="ln">2366</td><td>    child_policy: nn.Module,</td></tr>
+      <tr><td class="ln">2367</td><td>    dad_policy: nn.Module,</td></tr>
+      <tr><td class="ln">2368</td><td>    mom_policy: nn.Module,</td></tr>
+      <tr><td class="ln">2369</td><td>    env=<span class="kw">None</span>,</td></tr>
+      <tr><td class="ln">2370</td><td>    obs_batch: Optional[torch.Tensor] = <span class="kw">None</span>,</td></tr>
+      <tr><td class="ln">2371</td><td>    n_obs_samples: <span class="kw">int</span> = <span class="num">512</span>,</td></tr>
+      <tr><td class="ln">2372</td><td>):</td></tr>
+      <tr><td class="ln">2373</td><td>    <span class="str">"""</span></td></tr>
+      <tr><td class="ln">2374</td><td>    <span class="str">「重建被截肢的另一半」交叉通道初始化：</span></td></tr>
+      <tr><td class="ln">2375</td><td>    <span class="str">  拼接（create_dual_channel_policy）發生的瞬間，dad 上半神經元原本依賴的「dad 自己的下半</span></td></tr>
+      <tr><td class="ln">2376</td><td>    <span class="str">  輸入」被替換成「mom 的下半」，等於截肢；dad 自己的右上交叉區塊 Wd[:oh, ih:] 原本就是</span></td></tr>
+      <tr><td class="ln">2377</td><td>    <span class="str">  「處理下半輸入」的權重，只是現在下半換成了 mom，訊號對不上。</span></td></tr>
+      <tr><td class="ln">2378</td><td></td></tr>
+      <tr><td class="ln">2379</td><td>    <span class="str">  修法：用 OT 把「mom 下半」翻譯成「dad 自己原本下半該有的樣子」，讓 dad 自己的交叉權重</span></td></tr>
+      <tr><td class="ln">2380</td><td>    <span class="str">  繼續work：</span></td></tr>
+      <tr><td class="ln">2381</td><td>    <span class="str">    X_md = Wd[:oh, ih:] @ T_bb   （T_bb：dad自己下半 vs mom自己下半，兩邊都是「母系血統」半層）</span></td></tr>
+      <tr><td class="ln">2382</td><td>    <span class="str">    X_dm = Wm[oh:, :ih] @ T_tt   （T_tt：dad自己上半 vs mom自己上半，兩邊都是「父系血統」半層）</span></td></tr>
+      <tr><td class="ln">2383</td><td>    <span class="str">  不做平均——這是重建单一血統的訊號，不是融合兩個血統。</span></td></tr>
+      <tr><td class="ln">2384</td><td></td></tr>
+      <tr><td class="ln">2385</td><td>    <span class="str">  第一層特殊：輸入是共用觀測值，沒有「上半/下半」語意，create_dual_channel_policy 拼接時</span></td></tr>
+      <tr><td class="ln">2386</td><td>    <span class="str">  放的 Wd[:oh, ih:]（dad 原生右上區塊）本來就是精確解，完全不覆寫。</span></td></tr>
+      <tr><td class="ln">2387</td><td></td></tr>
+      <tr><td class="ln">2388</td><td>    <span class="str">  T_bb / T_tt 每層獨立算（不像 recursive_ot 需要逐層傳遞），因為直接拿 dad_policy /</span></td></tr>
+      <tr><td class="ln">2389</td><td>    <span class="str">  mom_policy 各自完整原生前向傳播的真實激活值來比對，不依賴前面層的翻譯結果。</span></td></tr>
+      <tr><td class="ln">2390</td><td>    <span class="str">"""</span></td></tr>
+      <tr><td class="ln">2391</td><td>    <span class="fn">print</span>(<span class="str">"[Reconstruct OT] 重建被截肢半層的交叉通道..."</span>)</td></tr>
+      <tr><td class="ln">2392</td><td></td></tr>
+      <tr><td class="ln">2393</td><td>    SKIP_LAYERS = {<span class="str">"action_net"</span>, <span class="str">"value_net"</span>}</td></tr>
+      <tr><td class="ln">2394</td><td>    dad_modules = <span class="fn">dict</span>(dad_policy.named_modules())</td></tr>
+      <tr><td class="ln">2395</td><td>    mom_modules = <span class="fn">dict</span>(mom_policy.named_modules())</td></tr>
+      <tr><td class="ln">2396</td><td></td></tr>
+      <tr><td class="ln">2397</td><td>    layer_names = [</td></tr>
+      <tr><td class="ln">2398</td><td>        name <span class="kw">for</span> name, module <span class="kw">in</span> child_policy.named_modules()</td></tr>
+      <tr><td class="ln">2399</td><td>        <span class="kw">if</span> <span class="fn">isinstance</span>(module, nn.Linear) <span class="kw">and</span> <span class="kw">not</span> <span class="fn">any</span>(s <span class="kw">in</span> name <span class="kw">for</span> s <span class="kw">in</span> SKIP_LAYERS)</td></tr>
+      <tr><td class="ln">2400</td><td>    ]</td></tr>
+      <tr><td class="ln">2401</td><td></td></tr>
+      <tr><td class="ln">2402</td><td>    use_acts = <span class="kw">False</span></td></tr>
+      <tr><td class="ln">2403</td><td>    dad_acts_by_layer = mom_acts_by_layer = <span class="kw">None</span></td></tr>
+      <tr><td class="ln">2404</td><td>    <span class="kw">if</span> obs_batch <span class="kw">is</span> <span class="kw">None</span> <span class="kw">and</span> env <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:</td></tr>
+      <tr><td class="ln">2405</td><td>        obs_batch = <span class="fn">_sample_observations</span>(env, n_samples=n_obs_samples)</td></tr>
+      <tr><td class="ln">2406</td><td>    <span class="kw">if</span> obs_batch <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:</td></tr>
+      <tr><td class="ln">2407</td><td>        dad_acts_by_layer = <span class="fn">_collect_pure_activations</span>(dad_policy, obs_batch, layer_names)</td></tr>
+      <tr><td class="ln">2408</td><td>        mom_acts_by_layer = <span class="fn">_collect_pure_activations</span>(mom_policy, obs_batch, layer_names)</td></tr>
+      <tr><td class="ln">2409</td><td>        use_acts = <span class="kw">True</span></td></tr>
+      <tr><td class="ln">2410</td><td>        <span class="fn">print</span>(<span class="str">f"[Reconstruct OT] 使用 activation-based 對齊（{obs_batch.shape[0]} 筆真實觀測）"</span>)</td></tr>
+      <tr><td class="ln">2411</td><td>    <span class="kw">else</span>:</td></tr>
+      <tr><td class="ln">2412</td><td>        <span class="fn">print</span>(<span class="str">"[Reconstruct OT] 未提供 env/obs_batch，退回 weight-based 對齊"</span>)</td></tr>
+      <tr><td class="ln">2413</td><td></td></tr>
+      <tr><td class="ln">2414</td><td>    <span class="kw">for</span> i, name <span class="kw">in</span> <span class="fn">enumerate</span>(layer_names):</td></tr>
+      <tr><td class="ln">2415</td><td>        child_m = <span class="fn">dict</span>(child_policy.named_modules()).get(name)</td></tr>
+      <tr><td class="ln">2416</td><td>        dad_m = dad_modules.get(name)</td></tr>
+      <tr><td class="ln">2417</td><td>        mom_m = mom_modules.get(name)</td></tr>
+      <tr><td class="ln">2418</td><td>        <span class="kw">if</span> child_m <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> dad_m <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> mom_m <span class="kw">is</span> <span class="kw">None</span>:</td></tr>
+      <tr><td class="ln">2419</td><td>            <span class="kw">continue</span></td></tr>
+      <tr><td class="ln">2420</td><td></td></tr>
+      <tr><td class="ln">2421</td><td>        W = child_m.weight.data</td></tr>
+      <tr><td class="ln">2422</td><td>        oh, ih = W.shape[<span class="num">0</span>] // <span class="num">2</span>, W.shape[<span class="num">1</span>] // <span class="num">2</span></td></tr>
+      <tr><td class="ln">2423</td><td>        <span class="kw">if</span> oh == <span class="num">0</span> <span class="kw">or</span> ih == <span class="num">0</span>:</td></tr>
+      <tr><td class="ln">2424</td><td>            <span class="kw">continue</span></td></tr>
+      <tr><td class="ln">2425</td><td></td></tr>
+      <tr><td class="ln">2426</td><td>        Wd = dad_m.weight.data</td></tr>
+      <tr><td class="ln">2427</td><td>        Wm = mom_m.weight.data</td></tr>
+      <tr><td class="ln">2428</td><td></td></tr>
+      <tr class="hl"><td class="ln">2429</td><td>        <span class="kw">if</span> i == <span class="num">0</span>:</td></tr>
+      <tr><td class="ln">2430</td><td class="cm">            # 第一層：輸入是共用觀測值，create_dual_channel_policy 放的原始值已是精確解，不動</td></tr>
+      <tr><td class="ln">2431</td><td>            <span class="fn">print</span>(<span class="str">f"  [{name}] 第一層，維持原始拼接值（精確解，不需翻譯）"</span>)</td></tr>
+      <tr class="hl"><td class="ln">2432</td><td>            <span class="kw">continue</span></td></tr>
+      <tr><td class="ln">2433</td><td></td></tr>
+      <tr><td class="ln">2434</td><td class="cm">        # 深層：Wd 自己的下半(母系血統) vs Wm 自己的下半(母系血統) → T_bb</td></tr>
+      <tr><td class="ln">2435</td><td class="cm">        #       Wd 自己的上半(父系血統) vs Wm 自己的上半(父系血統) → T_tt</td></tr>
+      <tr><td class="ln">2436</td><td>        <span class="kw">if</span> use_acts:</td></tr>
+      <tr class="hl"><td class="ln">2437</td><td>            dad_bottom = dad_acts_by_layer[name][:, oh:]   <span class="cm"># dad 自己下半的真實反應</span></td></tr>
+      <tr class="hl"><td class="ln">2438</td><td>            mom_bottom = mom_acts_by_layer[name][:, oh:]   <span class="cm"># mom 自己下半的真實反應</span></td></tr>
+      <tr><td class="ln">2439</td><td>            dad_top    = dad_acts_by_layer[name][:, :oh]   <span class="cm"># dad 自己上半的真實反應</span></td></tr>
+      <tr><td class="ln">2440</td><td>            mom_top    = mom_acts_by_layer[name][:, :oh]   <span class="cm"># mom 自己上半的真實反應</span></td></tr>
+      <tr class="hl"><td class="ln">2441</td><td>            T_bb = <span class="fn">_compute_layer_transport_from_acts</span>(dad_bottom, mom_bottom).to(W.device)</td></tr>
+      <tr><td class="ln">2442</td><td>            T_tt = <span class="fn">_compute_layer_transport_from_acts</span>(dad_top, mom_top).to(W.device)</td></tr>
+      <tr><td class="ln">2443</td><td>        <span class="kw">else</span>:</td></tr>
+      <tr class="hl"><td class="ln">2444</td><td>            T_bb = <span class="fn">_compute_layer_transport</span>(Wd[oh:, ih:], Wm[oh:, ih:])</td></tr>
+      <tr><td class="ln">2445</td><td>            T_tt = <span class="fn">_compute_layer_transport</span>(Wd[:oh, :ih], Wm[:oh, :ih])</td></tr>
+      <tr><td class="ln">2446</td><td></td></tr>
+      <tr class="hl"><td class="ln">2447</td><td>        Wd_cross = Wd[:oh, ih:].float()   <span class="cm"># dad 自己原生的右上交叉區塊</span></td></tr>
+      <tr class="hl"><td class="ln">2448</td><td>        Wm_cross = Wm[oh:, :ih].float()   <span class="cm"># mom 自己原生的左下交叉區塊</span></td></tr>
+      <tr><td class="ln">2449</td><td></td></tr>
+      <tr class="hl"><td class="ln">2450</td><td>        W[:oh, ih:] = (Wd_cross @ T_bb.to(Wd_cross.device)).to(W.dtype)</td></tr>
+      <tr class="hl"><td class="ln">2451</td><td>        W[oh:, :ih] = (Wm_cross @ T_tt.to(Wm_cross.device)).to(W.dtype)</td></tr>
+      <tr><td class="ln">2452</td><td></td></tr>
+      <tr><td class="ln">2453</td><td>    <span class="fn">print</span>(<span class="str">"[Reconstruct OT] 完成。"</span>)</td></tr>
+    </table>
+  </div>
+  <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">完整檔案位置：<code class="inline">BipedalWalker-v3_ppo/BipedalWalker-v3.py</code></p>
+</section>
+
+<section id="compare" class="toc-scroll">
+  <h2>6. 跟 recursive_ot_initialize_crosstalk 的差異</h2>
+  <table class="data cmp-table">
+    <tr><th></th><th>recursive_ot_initialize_crosstalk</th><th>reconstruct_ot_initialize_crosstalk</th></tr>
+    <tr><td>核心思路</td><td>翻譯 + 平均（融合兩個血統）</td><td>翻譯 + 重建（修復被截斷的單一血統）</td></tr>
+    <tr><td>T 的比對依據</td><td>交叉通道本身（鏡像位置）</td><td>純通道（同血緣半層：上半vs上半、下半vs下半）</td></tr>
+    <tr><td>T 鏈的關係</td><td>單一 T 鏈，逐層遞迴傳遞（上一層 T 會參與這一層 T 的計算）</td><td>T_bb / T_tt 每層獨立算，互不依賴</td></tr>
+    <tr><td>第一層怎麼處理</td><td>覆寫成 Wd_pure / Wm_pure</td><td>完全不動，維持原始拼接值</td></tr>
+    <tr><td>最終有沒有平均</td><td>有（0.5 × 翻譯值 + 對方那格）</td><td>沒有（純粹重建，不摻對方）</td></tr>
+    <tr><td>寫入的權重來源</td><td>純通道 Wd_pure / Wm_pure</td><td>交叉通道本身 Wd[:oh,ih:] / Wm[oh:,:ih]</td></tr>
+  </table>
+</section>
+
+<section id="caveats" class="toc-scroll">
+  <h2>7. 已知限制（實驗誠實記錄）</h2>
+  <div class="card warn">
+    <h3>目前實測結果</h3>
+    <p>用 dad = model3、mom = model2（各自 baseline ≈ 308 分）實測，<code class="inline">ot_reconstruct</code> 在<b>沒有搭配真正訓練</b>時，child 評估 reward 為 <b>-85.72</b>——雖然理論上第一層精確、只有第二層有 OT 殘留誤差，但結果仍落在「機器人幾乎立刻摔倒」的區間，跟其他公式版本（-77 ~ -133）同一量級，沒有顯著突破。</p>
+    <p>目前最可信的解釋：網路很淺（僅 2 層隱藏層），唯一有殘留誤差的第二層直接接上 <code class="inline">action_net</code>、沒有任何緩衝層去稀釋它；且 <code class="inline">action_net</code> 本身目前完全沒有被 OT 對齊處理。</p>
+  </div>
+  <div class="card ok">
+    <h3>下一步方向</h3>
+    <p>初始化本身提供的是「比隨機好」的起點，真正修正殘留誤差可能仍需要密集監督訊號（蒸餾）或足夠的線上訓練介入。</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  BipedalWalker-v3 GA 融合專案 · reconstruct_ot_initialize_crosstalk 技術文件
+</footer>
+
+<script>
+document.querySelectorAll('.tabbtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const tab = btn.dataset.tab;
+    const scope = btn.closest('.tabgroup') || document;
+    scope.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+    scope.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(tab).classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

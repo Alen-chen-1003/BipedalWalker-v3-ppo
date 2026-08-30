@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ot_mutual 雙通道融合 — 實作流程與實測結果</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F4F0;color:#1A1915;padding:28px;line-height:1.6}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:20px;font-weight:700;margin-bottom:6px}
+.sub{font-size:13px;color:#6B6960;margin-bottom:28px}
+h2{font-size:15px;font-weight:600;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid #E5E3DB;display:flex;align-items:center;gap:8px}
+h2 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#2563EB;color:#fff;font-size:12px;font-weight:700}
+h3{font-size:13.5px;font-weight:600;margin:16px 0 8px;color:#1A1915}
+p{font-size:13px;color:#33322E;margin-bottom:10px}
+code{font-family:'Consolas','Cascadia Code',monospace;font-size:12px;background:#EDEBE3;padding:1px 5px;border-radius:3px;color:#1A1915}
+.card{background:#FFFFFF;border:1px solid #E5E3DB;border-radius:10px;padding:18px 20px;margin-bottom:16px}
+.flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:14px 0}
+.fbox{background:#EEF4FF;border:1px solid #93B4F7;color:#1E40AF;border-radius:8px;padding:9px 13px;font-size:12px;font-weight:500;text-align:center;min-width:110px}
+.fbox.gray{background:#F1EFE8;border-color:#D5D3CC;color:#6B6960}
+.fbox.warn{background:#FDECEC;border-color:#F3B4B4;color:#9B1C1C}
+.arrow{color:#B5B2A6;font-size:16px}
+pre{background:#2B2A27;border-radius:8px;padding:14px 16px;overflow-x:auto;font-family:'Consolas','Cascadia Code',monospace;font-size:11.8px;line-height:1.75;color:#D4D0C4;margin:10px 0}
+.kw{color:#C084FC}.fn{color:#F97316}.cm{color:#6B7280;font-style:italic}.nm{color:#FBBF24}.st{color:#34D399}.vr{color:#93C5FD}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.matrix-demo{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin:14px 0}
+.mw{display:flex;flex-direction:column;align-items:center;gap:6px}
+.ml{font-size:10.5px;color:#888780;font-family:'Consolas',monospace}
+.mg{display:grid;gap:2px}
+.ce{width:46px;height:30px;display:flex;align-items:center;justify-content:center;font-size:10px;font-family:'Consolas',monospace;border-radius:3px;font-weight:600}
+.c-dd{background:#CECBF6;color:#3C3489}
+.c-mm{background:#9FE1CB;color:#085041}
+.c-md{background:#F7C1C1;color:#791F1F}
+.c-dm{background:#FAC775;color:#633806}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:#444340;margin-top:10px}
+.lg{display:flex;align-items:center;gap:5px}
+.sw{width:13px;height:13px;border-radius:3px;display:inline-block}
+.hbox{border-left:3px solid #93B4F7;padding:9px 12px;background:#EEF4FF;border-radius:0 6px 6px 0;font-size:12.5px;color:#1E3A8A;margin:10px 0;line-height:1.7}
+.hbox.warn{border-left-color:#EF4444;background:#FEF2F2;color:#991B1B}
+.hbox.ok{border-left-color:#22C55E;background:#F0FDF4;color:#166534}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+th,td{border:1px solid #E5E3DB;padding:8px 10px;text-align:center}
+th{background:#F5F4F0;font-weight:600;color:#33322E}
+td.neg{color:#B91C1C;font-weight:700}
+td.pos{color:#166534;font-weight:700}
+.tag{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:10px;background:#F1EFE8;color:#6B6960;font-weight:500}
+.tag.red{background:#FDECEC;color:#9B1C1C}
+.tag.blue{background:#EEF4FF;color:#1E40AF}
+.step-list{counter-reset:step}
+.step-item{display:flex;gap:12px;margin-bottom:14px}
+.step-num{counter-increment:step;flex-shrink:0;width:24px;height:24px;border-radius:50%;background:#1A1915;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.step-num::before{content:counter(step)}
+.footer{margin-top:30px;padding-top:16px;border-top:1px solid #E5E3DB;font-size:11.5px;color:#999690}
+canvas{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>ot_mutual 雙通道融合 — 完整實作流程與實測結果</h1>
+<div class="sub">對應程式：BipedalWalker-v3_ppo/BipedalWalker-v3.py &nbsp;|&nbsp; dad = model3.zip　mom = model2.zip　（各自獨立訓練，無共同祖先）</div>
+
+<h2><span class="num">1</span>整體流程</h2>
+<div class="card">
+<p>指令：<code>--test_ties --crossover ot_mutual --dad model3.zip --mom model2.zip</code>，實際執行的四個階段如下：</p>
+<div class="flow">
+  <div class="fbox">載入 dad / mom<br><span style="font-weight:400">PPO.load(...)</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox">create_dual_channel_policy<br><span style="font-weight:400">上半=dad 下半=mom</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox">mutual_ot_initialize_crosstalk<br><span style="font-weight:400">OT 對齊交叉通道</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox warn">蒸餾 epochs=0<br><span style="font-weight:400">刻意跳過，不微調</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox gray">評估 child<br><span style="font-weight:400">3 episodes 平均reward</span></div>
+</div>
+<div class="hbox warn"><b>關鍵前提：</b>dad / mom 是各自從頭獨立訓練、彼此權重空間互不相關的兩個 PPO agent。這代表「事後對齊、不做任何梯度微調」的融合方式，天生就會很吃力——這點會在第 5 節的結果中直接反映出來。</div>
+</div>
+
+<h2><span class="num">2</span>資料結構：雙通道權重矩陣的四個象限</h2>
+<div class="card">
+<p><code>create_dual_channel_policy</code> 把每個隱藏層（例如 <code>policy_net.2</code>，64→64）拆成上下兩半：<b>輸出</b>的上半 32 顆神經元固定用 dad 的權重列、下半 32 顆固定用 mom 的權重列。因為上一層的輸出同樣是「上32=dad、下32=mom」，所以每個權重矩陣 <code>W</code>（形狀 [64,64]）可以看成 2×2 的區塊矩陣：</p>
+<div class="matrix-demo">
+  <div class="mw">
+    <div class="ml">W [64 × 64]　(oh = ih = 32)</div>
+    <div class="mg" style="grid-template-columns:repeat(2,1fr)">
+      <div class="ce c-dd" style="width:120px;height:70px">純 dad→dad<br>(不動)</div>
+      <div class="ce c-md" style="width:120px;height:70px">X_md<br>mom→dad</div>
+      <div class="ce c-dm" style="width:120px;height:70px">X_dm<br>dad→mom</div>
+      <div class="ce c-mm" style="width:120px;height:70px">純 mom→mom<br>(不動)</div>
+    </div>
+  </div>
+</div>
+<div class="legend">
+  <span class="lg"><span class="sw" style="background:#CECBF6"></span>左上：dad 神經元收 dad 輸入 — 從沒被破壞，維持原樣</span>
+  <span class="lg"><span class="sw" style="background:#9FE1CB"></span>右下：mom 神經元收 mom 輸入 — 維持原樣</span>
+  <span class="lg"><span class="sw" style="background:#F7C1C1"></span>右上 X_md：dad 神經元卻要收 mom 傳來的訊號 — 從沒訓練過，需要 OT 對齊</span>
+  <span class="lg"><span class="sw" style="background:#FAC775"></span>左下 X_dm：mom 神經元卻要收 dad 傳來的訊號 — 同樣需要對齊</span>
+</div>
+<pre><span class="cm"># create_dual_channel_policy() 核心：整層維度不變，只是"半拆半併"</span>
+<span class="vr">out_half</span> = dad_w.shape[<span class="nm">0</span>] // <span class="nm">2</span>
+child_module.weight.data[:out_half, :] = dad_w[:out_half, :]   <span class="cm"># 上半：整列全部沿用 dad</span>
+child_module.weight.data[out_half:, :] = mom_w[out_half:, :]   <span class="cm"># 下半：整列全部沿用 mom</span>
+<span class="cm"># → 此刻 X_md、X_dm 兩個象限的值，其實就是 dad/mom 自己在"錯誤欄位"上的原始權重，
+#    完全沒有對齊過，mutual_ot 就是要修正這兩塊</span></pre>
+<div class="hbox"><code>action_net</code>（輸出馬達扭矩，64→4）不拆分、整層固定用 dad 權重；<code>value_net</code> 因輸出維度是 1（奇數）也整層跳過，兩者都被排除在 OT 對齊之外。</div>
+</div>
+
+<h2><span class="num">3</span>mutual_ot_initialize_crosstalk：兩步驟</h2>
+<div class="card">
+<h3>3.1　初始種子（seed）：用自己的純區塊、經上一層的 T 翻譯過去</h3>
+<pre><span class="kw">for</span> name <span class="kw">in</span> layer_names:            <span class="cm"># 依序處理每個 Linear 層（僅 policy_net，value_net/action_net 被跳過）</span>
+    Wd_pure = dad_m.weight.data[:oh, :ih]   <span class="cm"># dad 自己左上角純區塊</span>
+    Wm_pure = mom_m.weight.data[oh:, ih:]   <span class="cm"># mom 自己右下角純區塊</span>
+    <span class="kw">if</span> T_prev <span class="kw">is</span> <span class="kw">None</span>:               <span class="cm"># 第一層還沒有上一層的對齊資訊</span>
+        W[:oh, ih:] = Wd_pure.clone()
+        W[oh:, :ih] = Wm_pure.clone()
+    <span class="kw">else</span>:                          <span class="cm"># 後續層：把上一層算出的 T 沿用過來</span>
+        W[:oh, ih:] = Wd_pure.float() @ T_prev
+        W[oh:, :ih] = Wm_pure.float() @ T_prev.t()
+    T_prev = _compute_layer_transport(Wd_pure, Wm_pure)   <span class="cm"># 為下一層準備 T</span></pre>
+<p>這一步只是給 X_md / X_dm 一個「不是隨機亂數」的合理起點，還沒開始真正疊代收斂。</p>
+
+<h3>3.2　疊代收斂（本次改版：X_dm 當錨點，X_md 對齊後與舊值取平均）</h3>
+<pre><span class="kw">for</span> it <span class="kw">in</span> <span class="fn">range</span>(n_iters):                       <span class="cm"># 最多 100 輪</span>
+    child_acts = _collect_pure_activations(child_policy, obs_batch, layer_names)  <span class="cm"># 256 筆真實觀測跑一次前向傳播</span>
+    <span class="kw">for</span> name <span class="kw">in</span> layer_names:
+        X_md = W[:oh, ih:].clone()          <span class="cm"># 待更新</span>
+        X_dm = W[oh:, :ih].clone()          <span class="cm"># 錨點，本輪不變</span>
+
+        acts_upper = acts[:, :oh]           <span class="cm"># dad 神經元的真實 activation（256, 32）</span>
+        acts_lower = acts[:, oh:]           <span class="cm"># mom 神經元的真實 activation（256, 32）</span>
+        T = _compute_layer_transport_from_acts(acts_upper, acts_lower)  <span class="cm"># (32,32) OT 傳輸矩陣</span>
+
+        X_md_new = <span class="nm">0.5</span> * (X_md + T.t() @ X_dm)  <span class="cm"># 對齊到 X_dm 座標系後，跟舊值平均，平滑收斂</span>
+        W[:oh, ih:] = X_md_new
+        <span class="cm"># W[oh:, :ih]（X_dm）維持不動</span>
+
+    delta = ||X_md_new - X_md||             <span class="cm"># 全部層合計的變化量</span>
+    <span class="kw">if</span> delta &lt; tol: <span class="kw">break</span>              <span class="cm"># tol = 1e-3</span></pre>
+<div class="hbox">為什麼選 <b>X_dm 當錨點</b>：因為 <code>action_net</code> 完全沿用 dad 權重，最後一層拿到的 64 維向量應該盡量貼近「dad 自己網路本來會產生的分佈」。讓 X_dm（mom 一側）固定代表 mom 自己真實的行為，只讓 X_md（要餵給 dad 神經元的訊號）去對齊它，比讓兩邊互相拉扯、收斂到一個誰都不像的平均值更有明確語意。</div>
+</div>
+
+<h2><span class="num">4</span>OT 傳輸矩陣 T 怎麼算</h2>
+<div class="card">
+<pre><span class="kw">def</span> <span class="fn">_compute_layer_transport_from_acts</span>(dad_acts, mom_acts):
+    <span class="cm"># dad_acts, mom_acts: (256, 32) —— 256 筆觀測、32 顆神經元的真實 activation</span>
+    d = dad_acts.t()   <span class="cm"># (32, 256) 每顆 dad 神經元視為一個 256 維的"行為向量"</span>
+    m = mom_acts.t()   <span class="cm"># (32, 256) 每顆 mom 神經元同理</span>
+    C[i, j] = ||d[i] - m[j]||²                <span class="cm"># 32×32 的成本矩陣：dad神經元i 與 mom神經元j 的行為差多少</span>
+    T = <span class="fn">ot.emd</span>(uniform, uniform, C)     <span class="cm"># 精確最優傳輸（Earth Mover's Distance）</span>
+    T = T / T.sum(dim=<span class="nm">0</span>)                     <span class="cm"># 每欄正規化 → 軟置換矩陣（soft permutation）</span></pre>
+<p>直覺：<code>C[i,j]</code> 越小代表「dad 的第 i 顆神經元」跟「mom 的第 j 顆神經元」在同樣一批真實 state 上的反應越像。<code>ot.emd</code> 會找出一個總搬運成本最小的配對方案，近似「幫每顆 dad 神經元找一個 mom 裡最像的替身」。</p>
+<div class="hbox warn"><b>侷限：</b>這只保證「統計上最像」，不保證某個特定 state 下數值完全一致——因為 dad、mom 是兩個完全獨立訓練出來的網路，內部表徵本來就沒有真正的對應關係可言。這是第 5 節結果崩潰的根本原因，不是程式錯誤。</div>
+</div>
+
+<h2><span class="num">5</span>三次實測結果</h2>
+<div class="card">
+<p>同樣的 <code>--crossover ot_mutual --ties_n_eval 3</code>，跑了三次（第三次已套用「X_dm 錨點＋平均收斂」的新版演算法）：</p>
+<table>
+<tr><th>版本</th><th>Dad 平均</th><th>Mom 平均</th><th>Child 平均</th><th>疊代收斂狀況</th><th>是否超越雙親</th></tr>
+<tr><td>v1　weight-based T 退化<br><span class="tag red">obs 取樣失敗</span></td><td>308.25</td><td>309.83</td><td class="neg">-116.30</td><td>diff 卡在 4.945（未收斂）</td><td class="neg">❌</td></tr>
+<tr><td>v2　activation-based T<br><span class="tag blue">對稱雙向平均</span></td><td>308.76</td><td>309.01</td><td class="neg">-109.65</td><td>第11輪起收斂到固定點 4.9116</td><td class="neg">❌</td></tr>
+<tr><td>v3　activation-based T<br><span class="tag blue">X_dm 錨點＋平滑更新</span></td><td>307.39</td><td>309.02</td><td class="neg">-104.68</td><td>ΔX_md 在 4~6 間震盪，未收斂</td><td class="neg">❌</td></tr>
+</table>
+<div class="hbox warn">三次修法，child reward 從 -116 → -109 → -104，OT 對齊方式的調整確實讓崩潰程度略微減緩，但幅度遠遠不足以接近雙親的 ~308。dad/mom 摔倒前通常能撐滿全場拿到 300+ 分，child 的負分代表機器人幾乎是一開局就跌倒。</div>
+<div class="hbox">三次都刻意設 <code>epochs=0</code> 跳過蒸餾（依您的要求，只測純 OT 效果），因此上面的數字反映的是「OT 對齊 + 零微調」這個組合本身的上限。</div>
+</div>
+
+<h2><span class="num">6</span>診斷結論</h2>
+<div class="card">
+<div class="step-list">
+<div class="step-item"><div class="step-num"></div><div><b>Layer 0 完全沒問題</b>：輸入是原始 24 維觀測，dad/mom 兩半神經元的輸出各自跟單獨跑起來時完全一致。</div></div>
+<div class="step-item"><div class="step-num"></div><div><b>Layer 2 開始失真</b>：dad 原本的權重是為「全部 64 維都來自 dad 自己」的輸入訓練的，現在下半 32 維被換成 mom 的訊號，OT 只能提供「統計上相似」的替代值，無法還原 dad 真正期待的精確數值。</div></div>
+<div class="step-item"><div class="step-num"></div><div><b>誤差逐層累積</b>：到 <code>action_net</code>（完全沿用 dad、且從未參與任何對齊）時，收到的 64 維向量已經與 dad 原本訓練時看到的分佈差異很大，因此輸出的馬達扭矩失真，child 一開局就摔倒。</div></div>
+<div class="step-item"><div class="step-num"></div><div><b>根本原因是架構性的，不是實作 bug</b>：dad、mom 無共同祖先、各自獨立訓練 → 兩者權重空間本來就不共享同一個 loss basin → 事後對齊（不論哪種 OT 變體）都難以完全修復，這是模型融合研究裡的已知限制，只有搭配微調／蒸餾才能有效修復殘餘誤差。</div></div>
+</div>
+</div>
+
+<div class="footer">產生時間：2026-07-10　|　對應程式碼：BipedalWalker-v3_ppo/BipedalWalker-v3.py（create_dual_channel_policy, mutual_ot_initialize_crosstalk, _compute_layer_transport_from_acts）</div>
+</div>
+</body>
+</html>

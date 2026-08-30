@@ -1,0 +1,56 @@
+# 模型檔案（太大）
+*.pt
+*.pkl
+*.pth
+*.npz
+*.npy
+*.zip
+*.db
+
+# 訓練 log 和輸出
+logs/
+models/
+best_model/
+child_models/
+test_models/
+test_models_by_gen/
+results/
+results(1)/
+gen_model_json/
+weight_dump/
+weight_dump.zip/
+videos*/
+actions_analysis*/
+actions_stept*/
+
+# Python 暫存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 虛擬環境
+env/
+venv/
+.env
+*.conda
+ml_env.yml
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 系統檔
+.DS_Store
+Thumbs.db
+
+# Claude 內部設定
+.claude/
+
+# VS Code
+.vscode/
+
+# 圖表輸出（可選：如果你想保留就刪掉這行）
+圖表/
+*.png

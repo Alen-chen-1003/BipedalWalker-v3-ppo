@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>recursive_ot_initialize_crosstalk 逐步詳解</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a24; --panel2:#1d2130; --border:#2a2f42;
+    --text:#e6e8f0; --muted:#9aa1b8; --accent:#7dd3fc; --accent2:#f0abfc;
+    --dad:#60a5fa; --mom:#f472b6; --pure:#34d399; --cross:#fbbf24;
+    --code-bg:#0b0d13; --warn:#f87171; --ok:#4ade80;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;
+    background:radial-gradient(circle at 20% 0%, #1a1f30 0%, var(--bg) 55%);
+    color:var(--text); line-height:1.75; padding-bottom:80px;
+  }
+  header{
+    padding:64px 24px 40px; text-align:center;
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, rgba(125,211,252,0.08), transparent);
+  }
+  header h1{
+    font-size:2.1rem; margin:0 0 12px; letter-spacing:0.5px;
+    background:linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header p{color:var(--muted); max-width:680px; margin:0 auto; font-size:1.02rem;}
+  header .updated{
+    display:inline-block; margin-top:14px; font-size:0.78rem; color:var(--ok);
+    background:rgba(74,222,128,0.1); border:1px solid rgba(74,222,128,0.35);
+    padding:4px 12px; border-radius:999px;
+  }
+  nav{
+    display:flex; flex-wrap:wrap; justify-content:center; gap:10px;
+    max-width:1000px; margin:28px auto 0; padding:0 16px;
+  }
+  nav a{
+    color:var(--muted); text-decoration:none; font-size:0.88rem;
+    padding:7px 14px; border:1px solid var(--border); border-radius:999px;
+    transition:all .15s;
+  }
+  nav a:hover{color:var(--accent); border-color:var(--accent);}
+
+  main{max-width:920px; margin:0 auto; padding:0 20px;}
+  section{margin-top:64px;}
+  section h2{
+    font-size:1.5rem; margin-bottom:6px; display:flex; align-items:center; gap:10px;
+  }
+  .tag{
+    font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:6px;
+    letter-spacing:0.5px; text-transform:uppercase;
+  }
+  .tag.dad{background:rgba(96,165,250,0.15); color:var(--dad); border:1px solid rgba(96,165,250,0.4);}
+  .tag.mom{background:rgba(244,114,182,0.15); color:var(--mom); border:1px solid rgba(244,114,182,0.4);}
+  .subtitle{color:var(--muted); margin-bottom:22px; font-size:0.95rem;}
+
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:22px 24px; margin-bottom:18px;
+  }
+  .card h3{margin-top:0; font-size:1.05rem; color:var(--accent);}
+  .card.warn{border-color:rgba(248,113,113,0.4); background:rgba(248,113,113,0.06);}
+  .card.warn h3{color:var(--warn);}
+  .card.ok{border-color:rgba(74,222,128,0.35); background:rgba(74,222,128,0.05);}
+
+  code, pre{font-family:"Cascadia Code","Consolas",monospace;}
+  code.inline{
+    background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:5px;
+    font-size:0.86rem; color:var(--accent);
+  }
+  .kw{color:#c792ea;} .fn{color:#82aaff;} .str{color:#c3e88d;} .cm{color:#697098; font-style:italic;} .num{color:#f78c6c;}
+
+  /* matrix visuals */
+  .quad-wrap{display:flex; justify-content:center; margin:26px 0;}
+  table.qmat{border-collapse:separate; border-spacing:3px; font-size:0.85rem;}
+  table.qmat td{
+    width:96px; height:60px; text-align:center; border-radius:8px;
+    vertical-align:middle; padding:4px; font-weight:600;
+  }
+  .q-pure-dad{background:rgba(96,165,250,0.18); border:1.5px solid var(--dad); color:var(--dad);}
+  .q-pure-mom{background:rgba(244,114,182,0.18); border:1.5px solid var(--mom); color:var(--mom);}
+  .q-cross-hl{background:rgba(251,191,36,0.28); border:2px solid var(--cross); color:var(--cross);}
+  .qmat small{display:block; font-weight:400; opacity:0.8; font-size:0.72rem; margin-top:2px;}
+
+  .legend{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; font-size:0.82rem; color:var(--muted); margin-top:10px;}
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .dot{width:11px; height:11px; border-radius:3px; display:inline-block;}
+
+  .steps{counter-reset:step;}
+  .step{
+    position:relative; padding:20px 22px 20px 58px; margin-bottom:16px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:12px;
+  }
+  .step::before{
+    counter-increment:step; content:counter(step);
+    position:absolute; left:16px; top:20px; width:28px; height:28px;
+    border-radius:50%; background:linear-gradient(135deg, var(--accent), var(--accent2));
+    color:#0f1117; font-weight:800; display:flex; align-items:center; justify-content:center;
+    font-size:0.9rem;
+  }
+  .step h4{margin:0 0 8px; font-size:1rem;}
+
+  table.data{
+    width:100%; border-collapse:collapse; font-size:0.85rem; margin:14px 0;
+  }
+  table.data th, table.data td{
+    border:1px solid var(--border); padding:8px 10px; text-align:center;
+  }
+  table.data th{background:rgba(255,255,255,0.04); color:var(--muted); font-weight:600;}
+  .matnum{font-family:"Cascadia Code",monospace;}
+
+  .formula{
+    text-align:center; font-size:1.05rem; padding:16px; background:var(--code-bg);
+    border-radius:10px; border:1px solid var(--border); margin:16px 0;
+    font-family:"Cascadia Code",monospace; color:var(--accent);
+  }
+  .formula .op{color:var(--muted);}
+
+  .tabs{display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;}
+  .tabbtn{
+    background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+    padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem;
+    transition:all .15s;
+  }
+  .tabbtn.active{background:rgba(125,211,252,0.15); border-color:var(--accent); color:var(--accent);}
+  .tabpanel{display:none;}
+  .tabpanel.active{display:block;}
+
+  .flow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; margin:18px 0;}
+  .flow .node{
+    background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+    padding:10px 16px; font-size:0.85rem; text-align:center;
+  }
+  .flow .arrow{color:var(--muted); font-size:1.2rem;}
+
+  footer{
+    text-align:center; color:var(--muted); font-size:0.8rem; margin-top:80px; padding:20px;
+    border-top:1px solid var(--border);
+  }
+  .toc-scroll{scroll-margin-top:20px;}
+
+  /* line-numbered code blocks */
+  .codebox{
+    background:var(--code-bg); border:1px solid var(--border); border-radius:10px;
+    overflow-x:auto; margin:14px 0; font-size:0.83rem;
+  }
+  .codebox .filebar{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 14px; border-bottom:1px solid var(--border);
+    color:var(--muted); font-size:0.75rem; background:rgba(255,255,255,0.02);
+  }
+  .codebox .filebar b{color:var(--accent);}
+  .codebox table{border-collapse:collapse; width:100%;}
+  .codebox td{padding:1px 10px; white-space:pre; vertical-align:top;}
+  .codebox td.ln{
+    color:#4b5170; text-align:right; user-select:none; width:1%;
+    padding-right:14px; border-right:1px solid var(--border);
+  }
+  .codebox tr.hl{background:rgba(125,211,252,0.09);}
+  .codebox tr.hl td.ln{color:var(--accent); font-weight:700;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>recursive_ot_initialize_crosstalk</h1>
+  <p>雙通道 PPO 策略融合 — 逐層遞迴 OT 交叉通道初始化，逐行程式碼 + 具體數字例子完整拆解</p>
+  <span class="updated">已更新：全部層統一 weight-based，拿掉 activation-based 分支，程式碼更精簡</span>
+</header>
+
+<nav>
+  <a href="#background">背景：為什麼需要雙通道</a>
+  <a href="#problem">問題：交叉通道亂接</a>
+  <a href="#ot-idea">OT 的核心想法</a>
+  <a href="#recursion">為什麼是「遞迴」</a>
+  <a href="#walkthrough">逐步演算法拆解</a>
+  <a href="#example">完整數字例子</a>
+  <a href="#code">完整原始程式碼</a>
+  <a href="#caveats">已知限制</a>
+</nav>
+
+<main>
+
+<section id="background" class="toc-scroll">
+  <h2>1. 背景：雙通道架構在做什麼</h2>
+  <p class="subtitle">用兩個獨立訓練好的 PPO 策略（<span class="tag dad">dad</span> 與 <span class="tag mom">mom</span>）拼出一個保留雙親身分的子代網路</p>
+
+  <div class="card">
+    <p><code class="inline">create_dual_channel_policy</code> 把每一層隱藏層的神經元切成兩半：<b style="color:var(--dad)">上半永遠是 dad 的神經元</b>、<b style="color:var(--mom)">下半永遠是 mom 的神經元</b>。權重矩陣 <code class="inline">W</code>（形狀 [輸出, 輸入]）自然被切成四個象限：</p>
+  </div>
+
+  <div class="quad-wrap">
+    <table class="qmat">
+      <tr>
+        <td class="q-pure-dad">W<sub>dd</sub><small>dad→dad（純通道）</small></td>
+        <td class="q-cross-hl">X_md = W<sub>d</sub>[:oh,ih:]<small>mom→dad（交叉通道，右上）</small></td>
+      </tr>
+      <tr>
+        <td class="q-cross-hl">X_dm = W<sub>m</sub>[oh:,:ih]<small>dad→mom（交叉通道，左下）</small></td>
+        <td class="q-pure-mom">W<sub>mm</sub><small>mom→mom（純通道）</small></td>
+      </tr>
+    </table>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--dad)"></span>dad 純通道 — 保持不動，dad 身分原封不動保留</span>
+    <span><span class="dot" style="background:var(--mom)"></span>mom 純通道 — 保持不動，mom 身分原封不動保留</span>
+    <span><span class="dot" style="background:var(--cross)"></span>交叉通道 — 這次的重點：既是「算 T」的依據，也是「被寫入」的目標</span>
+  </div>
+</section>
+
+<section id="problem" class="toc-scroll">
+  <h2>2. 問題：交叉通道權重「認不出」它面對的輸入</h2>
+  <div class="card warn">
+    <h3>核心矛盾</h3>
+    <p><code class="inline">X_md</code>（右上角）的角色是「dad 的輸出神經元，要去解讀 mom 血統的輸入」。但 dad 訓練時，他自己的交叉區塊權重 <code class="inline">Wd[:oh, ih:]</code> 是拿來解讀 <b>dad 自己上一代遺傳下來的下半神經元</b>，跟這一輪真正的 mom 完全無關。如果不做任何對齊處理就直接使用，等於接上一組「認不出眼前輸入」的權重。</p>
+  </div>
+</section>
+
+<section id="ot-idea" class="toc-scroll">
+  <h2>3. Optimal Transport 在這裡做什麼</h2>
+  <p class="subtitle">OT 不是「複製貼上」，是幫兩邊神經元找出「誰的功能最像誰」的翻譯字典</p>
+
+  <div class="flow">
+    <div class="node">dad 交叉區塊<br><small style="color:var(--muted)">Wd[:oh,ih:]，右上</small></div>
+    <div class="arrow">⇄</div>
+    <div class="node" style="border-color:var(--accent); color:var(--accent)">OT 最佳傳輸<br><small style="color:var(--muted)">最小化配對總成本（weight-based）</small></div>
+    <div class="arrow">⇄</div>
+    <div class="node">mom 交叉區塊<br><small style="color:var(--muted)">Wm[oh:,:ih]，左下</small></div>
+  </div>
+
+  <div class="card ok">
+    <h3>T 的依據：交叉通道本身</h3>
+    <p>比對的兩個區塊選「鏡像位置」：dad 自己的 X_md 交叉區塊（右上）vs mom 自己的 X_dm 交叉區塊（左下）——這兩塊在四象限裡互為鏡像，跟純通道對角區塊（左上 vs 右下）算 T 是同一種對稱邏輯，只是從對角換成反對角。</p>
+  </div>
+
+  <div class="card">
+    <h3>全部層統一 weight-based</h3>
+    <p>不管第幾層，一律直接比較「（翻譯過的）交叉權重向量」的數值差距，不使用真實觀測驅動的反應。優點：不需要 <code class="inline">env</code>、不依賴抽樣品質、每次結果都是確定性的、算得快。</p>
+  </div>
+</section>
+
+<section id="recursion" class="toc-scroll">
+  <h2>4. 為什麼這是「遞迴」</h2>
+  <div class="card">
+    <p>符合遞迴的兩個要件：</p>
+    <div class="formula">基本情況（Layer 1）： T₁ <span class="op">=</span> f(Wd_cross₁, Wm_cross₁)　　　<span class="cm" style="color:var(--muted)"># 沒有依賴</span></div>
+    <div class="formula">遞迴情況（Layer l ≥ 2）： T_l <span class="op">=</span> f(Wd_cross_l @ T_{l-1}, Wm_cross_l)　　<span class="cm" style="color:var(--muted)"># 依賴 T_{l-1}</span></div>
+    <p>不只是 T，<b>寫入交叉通道的值也遞迴依賴這條鏈</b>——第 l 層的 <code class="inline">X_md</code> 用的是 <code class="inline">T_{l-1}</code>（上一層的結果），不是自己這一層的 T。整個網路的交叉通道要照層數順序、一層一層算完才能算下一層，不能跳著算、不能平行處理。</p>
+  </div>
+
+  <div class="card">
+    <h3>示意圖：T 如何從 Layer 1 遞迴傳到 Layer 2</h3>
+    <p style="color:var(--muted); font-size:0.88rem; margin-top:-8px;">對照第 6 節的數字例子、第 5 節的程式碼行號一起看</p>
+    <svg width="100%" viewBox="0 0 680 724" role="img" style="margin-top:8px;">
+      <title>Recursive OT 交叉通道遞迴範例</title>
+      <desc>示意圖展示 recursive_ot_initialize_crosstalk 如何用 Layer 1 的交叉區塊算出 T1，T1 用來翻譯 Layer 2 的 dad 交叉區塊，翻譯後的結果再跟 Layer 2 的 mom 交叉區塊算出 T2，如此遞迴傳遞到後續每一層。</desc>
+      <defs>
+        <marker id="arrow-rec" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+
+      <text x="340" y="28" text-anchor="middle" font-size="12" fill="var(--muted)">藍＝dad 交叉區塊　粉＝mom 交叉區塊　橘＝OT / 傳輸矩陣</text>
+
+      <!-- Layer 1 -->
+      <rect x="90" y="70" width="200" height="52" rx="6" fill="rgba(96,165,250,0.15)" stroke="var(--dad)" stroke-width="1"/>
+      <text x="190" y="92" text-anchor="middle" font-size="14" font-weight="600" fill="var(--dad)">Wd_cross₁</text>
+      <text x="190" y="110" text-anchor="middle" font-size="12" fill="var(--dad)">dad 右上原始值</text>
+
+      <rect x="390" y="70" width="200" height="52" rx="6" fill="rgba(244,114,182,0.15)" stroke="var(--mom)" stroke-width="1"/>
+      <text x="490" y="92" text-anchor="middle" font-size="14" font-weight="600" fill="var(--mom)">Wm_cross₁</text>
+      <text x="490" y="110" text-anchor="middle" font-size="12" fill="var(--mom)">mom 左下原始值</text>
+
+      <line x1="190" y1="122" x2="300" y2="190" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+      <line x1="490" y1="122" x2="380" y2="190" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="255" y="190" width="170" height="50" rx="6" fill="rgba(251,191,36,0.14)" stroke="var(--cross)" stroke-width="1"/>
+      <text x="340" y="211" text-anchor="middle" font-size="14" font-weight="600" fill="var(--cross)">OT 最佳傳輸</text>
+      <text x="340" y="228" text-anchor="middle" font-size="12" fill="var(--cross)">最小化配對成本</text>
+
+      <line x1="340" y1="240" x2="340" y2="270" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="255" y="270" width="170" height="44" rx="6" fill="rgba(251,191,36,0.14)" stroke="var(--cross)" stroke-width="1"/>
+      <text x="340" y="290" text-anchor="middle" font-size="14" font-weight="600" fill="var(--cross)">T1</text>
+      <text x="340" y="306" text-anchor="middle" font-size="12" fill="var(--cross)">傳輸矩陣 (oh×oh)</text>
+
+      <text x="90" y="344" font-size="14" font-weight="600" fill="var(--text)">Layer 2 交叉區塊</text>
+
+      <!-- Layer 2 -->
+      <rect x="90" y="370" width="200" height="52" rx="6" fill="rgba(96,165,250,0.15)" stroke="var(--dad)" stroke-width="1"/>
+      <text x="190" y="392" text-anchor="middle" font-size="14" font-weight="600" fill="var(--dad)">Wd_cross₂</text>
+      <text x="190" y="410" text-anchor="middle" font-size="12" fill="var(--dad)">layer2 dad 右上</text>
+
+      <line x1="190" y1="422" x2="190" y2="460" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="90" y="460" width="200" height="52" rx="6" fill="rgba(96,165,250,0.15)" stroke="var(--dad)" stroke-width="1"/>
+      <text x="190" y="482" text-anchor="middle" font-size="14" font-weight="600" fill="var(--dad)">Wd_cross_aligned</text>
+      <text x="190" y="500" text-anchor="middle" font-size="12" fill="var(--dad)">× T1 翻譯後</text>
+
+      <path d="M340,314 L340,486 L290,486" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="390" y="460" width="200" height="52" rx="6" fill="rgba(244,114,182,0.15)" stroke="var(--mom)" stroke-width="1"/>
+      <text x="490" y="482" text-anchor="middle" font-size="14" font-weight="600" fill="var(--mom)">Wm_cross₂</text>
+      <text x="490" y="500" text-anchor="middle" font-size="12" fill="var(--mom)">layer2 mom 左下</text>
+
+      <line x1="190" y1="512" x2="300" y2="580" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+      <line x1="490" y1="512" x2="380" y2="580" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="255" y="580" width="170" height="50" rx="6" fill="rgba(251,191,36,0.14)" stroke="var(--cross)" stroke-width="1"/>
+      <text x="340" y="601" text-anchor="middle" font-size="14" font-weight="600" fill="var(--cross)">OT 最佳傳輸</text>
+      <text x="340" y="618" text-anchor="middle" font-size="12" fill="var(--cross)">產生 T2</text>
+
+      <line x1="340" y1="630" x2="340" y2="660" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arrow-rec)"/>
+
+      <rect x="255" y="660" width="170" height="44" rx="6" fill="rgba(251,191,36,0.14)" stroke="var(--cross)" stroke-width="1"/>
+      <text x="340" y="680" text-anchor="middle" font-size="14" font-weight="600" fill="var(--cross)">T2</text>
+      <text x="340" y="696" text-anchor="middle" font-size="12" fill="var(--cross)">交給 Layer 3</text>
+    </svg>
+    <p style="color:var(--muted); font-size:0.85rem;">對應程式碼：橘色「OT 最佳傳輸」框 = <code class="inline">_compute_layer_transport()</code>（第 2332 行）；「Wd_cross_aligned」框 = 第 2328 行 <code class="inline">Wd_cross.float() @ T_prev</code>。</p>
+  </div>
+</section>
+
+<section id="walkthrough" class="toc-scroll">
+  <h2>5. 逐步拆解（對應真實行號）</h2>
+  <p class="subtitle">每一步都附上 <code class="inline">BipedalWalker-v3.py</code> 的原始程式碼與確切行號</p>
+
+  <div class="steps">
+    <div class="step">
+      <h4>準備純通道與交叉通道區塊（第 2307 ~ 2313 行）</h4>
+      <p>純通道（<code class="inline">Wd_pure</code>、<code class="inline">Wm_pure</code>）只用來「翻譯後寫入」；交叉通道（<code class="inline">Wd_cross</code>、<code class="inline">Wm_cross</code>）是算 T 的依據：</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2307–2313</b></div>
+        <table>
+          <tr><td class="ln">2307</td><td class="cm">        # 純通道區塊（僅用於「寫入交叉通道」的翻譯計算，不寫回，純通道保持不動）</td></tr>
+          <tr><td class="ln">2308</td><td>        Wd_pure = Wd[:oh, :ih]  <span class="cm"># (oh, ih)</span></td></tr>
+          <tr><td class="ln">2309</td><td>        Wm_pure = Wm[oh:, ih:]  <span class="cm"># (oh, ih)</span></td></tr>
+          <tr><td class="ln">2310</td><td></td></tr>
+          <tr><td class="ln">2311</td><td class="cm">        # 交叉通道區塊（鏡像位置：dad 的 X_md vs mom 的 X_dm，T 的計算依據）</td></tr>
+          <tr class="hl"><td class="ln">2312</td><td>        Wd_cross = Wd[:oh, ih:]   <span class="cm"># dad 自己的 X_md 交叉區塊（右上）</span></td></tr>
+          <tr class="hl"><td class="ln">2313</td><td>        Wm_cross = Wm[oh:, :ih]   <span class="cm"># mom 自己的 X_dm 交叉區塊（左下）</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="step">
+      <h4>Step 1 — 第一層：T₀ = 單位矩陣，不翻譯（第 2315 ~ 2319 行）</h4>
+      <p>第一層輸入是共用觀測值，不需要翻譯，直接複製純通道值進交叉通道；因為沒有上一層 T，<code class="inline">Wd_cross_aligned</code> 也是原始值：</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2315–2319</b></div>
+        <table>
+          <tr class="hl"><td class="ln">2315</td><td>        <span class="kw">if</span> T_prev <span class="kw">is</span> <span class="kw">None</span>:</td></tr>
+          <tr><td class="ln">2316</td><td class="cm">            # 第一層：T_0 = I，交叉通道 = 純通道權重（精確，無近似，不需要平均）</td></tr>
+          <tr><td class="ln">2317</td><td>            W[:oh, ih:] = Wd_pure.clone()</td></tr>
+          <tr><td class="ln">2318</td><td>            W[oh:, :ih] = Wm_pure.clone()</td></tr>
+          <tr class="hl"><td class="ln">2319</td><td>            Wd_cross_aligned = Wd_cross.float()  <span class="cm"># 沒有上一層 T，不翻譯</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="step">
+      <h4>Step 2 — 深層：翻譯 + 平均（寫入），並翻譯交叉區塊供下一步用（第 2320 ~ 2328 行）</h4>
+      <p>用上一層的 <code class="inline">T_prev</code> 翻譯純通道、寫入交叉通道；<b>同時（L2328）</b>也把 dad 自己的交叉區塊用同一個 <code class="inline">T_prev</code> 翻譯一次，供下一步算「這一層的新 T」用：</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2320–2328</b></div>
+        <table>
+          <tr><td class="ln">2320</td><td>        <span class="kw">else</span>:</td></tr>
+          <tr><td class="ln">2321</td><td class="cm">            # 深層：交叉通道 = 0.5 * (OT 翻譯值 + 對方自己那格的交叉通道)</td></tr>
+          <tr class="hl"><td class="ln">2322</td><td>            aligned_dad = (Wd_pure.float() @ T_prev.to(Wd_pure.device))</td></tr>
+          <tr class="hl"><td class="ln">2323</td><td>            aligned_mom = (Wm_pure.float() @ T_prev.t().to(Wm_pure.device))</td></tr>
+          <tr><td class="ln">2324</td><td>            W[:oh, ih:] = (<span class="num">0.5</span> * (aligned_dad + Wm[:oh, ih:].float())).to(W.dtype)</td></tr>
+          <tr><td class="ln">2325</td><td>            W[oh:, :ih] = (<span class="num">0.5</span> * (aligned_mom + Wd[oh:, :ih].float())).to(W.dtype)</td></tr>
+          <tr><td class="ln">2326</td><td></td></tr>
+          <tr><td class="ln">2327</td><td class="cm">            # ★ 跟論文一致：先用上一層的 T 翻譯 dad 交叉區塊的輸入端，再拿去算這一層的新 T</td></tr>
+          <tr class="hl"><td class="ln">2328</td><td>            Wd_cross_aligned = (Wd_cross.float() @ T_prev.to(Wd_cross.device))</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="step">
+      <h4>Step 3 — 用翻譯過的交叉區塊，算出這一層自己的新 T（第 2330 ~ 2332 行）</h4>
+      <p>不管是不是第一層，都會走到這一行；比較的是 <code class="inline">Wd_cross_aligned</code>（可能翻譯過，也可能是原始值）跟 <code class="inline">Wm_cross</code>：</p>
+      <div class="codebox">
+        <div class="filebar"><span>BipedalWalker-v3.py</span><b>L2330–2332</b></div>
+        <table>
+          <tr><td class="ln">2330</td><td class="cm">        # 計算本層的 T（用翻譯過的 Wd_cross_aligned，而非原始 Wd_cross），傳遞給下一層</td></tr>
+          <tr><td class="ln">2331</td><td class="cm">        # 全部層一律 weight-based：直接比較（翻譯過的）交叉權重向量</td></tr>
+          <tr class="hl"><td class="ln">2332</td><td>        T_prev = <span class="fn">_compute_layer_transport</span>(Wd_cross_aligned, Wm_cross)</td></tr>
+        </table>
+      </div>
+      <p style="color:var(--muted); font-size:0.88rem;">迴圈跑完所有層，<code class="inline">recursive_ot_initialize_crosstalk</code> 結束（第 2334 行 <code class="inline">print("[Recursive OT] 完成。")</code>）。</p>
+    </div>
+  </div>
+</section>
+
+<section id="example" class="toc-scroll">
+  <h2>6. 完整數字例子（2 層網路，每半層 2 顆神經元）</h2>
+  <p class="subtitle">玩具尺寸 oh = ih = 2；示範 T 如何從 Layer 1 遞迴傳到 Layer 2</p>
+
+  <div class="tabgroup">
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="e1">Layer 1（寫入 + 算第一個 T）</button>
+    <button class="tabbtn" data-tab="e2">算 T₁（交叉區塊對齊）</button>
+    <button class="tabbtn" data-tab="e3">Layer 2（翻譯寫入 + 算新 T）</button>
+  </div>
+
+  <div class="tabpanel active" id="e1">
+    <div class="card">
+      <h3>Layer 1 寫入（沒有上一層 T，精確複製）</h3>
+      <table class="data">
+        <tr><th></th><th>W<sub>d,pure</sub></th><th>W<sub>m,pure</sub></th></tr>
+        <tr><td class="matnum">神經元 A/X</td><td class="matnum">[0.50, -0.30]</td><td class="matnum">[0.15, 0.75]</td></tr>
+        <tr><td class="matnum">神經元 B/Y</td><td class="matnum">[0.20, 0.70]</td><td class="matnum">[0.55, -0.25]</td></tr>
+      </table>
+      <div class="formula">X_md（Layer1） <span class="op">=</span> W<sub>d,pure</sub> &nbsp;&nbsp; X_dm（Layer1） <span class="op">=</span> W<sub>m,pure</sub></div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="e2">
+    <div class="card">
+      <h3>Layer 1 自己的交叉區塊（用來算 T₁，交給 Layer 2）</h3>
+      <p>這是另外一組數字，跟上面的純通道無關——Wd_cross、Wm_cross 是 dad/mom 各自原生網路「右上」「左下」的原始值：</p>
+      <table class="data">
+        <tr><th></th><th>W<sub>d</sub>[:oh,ih:]（dad 自己右上）</th><th>W<sub>m</sub>[oh:,:ih]（mom 自己左下）</th></tr>
+        <tr><td class="matnum">神經元 A/X</td><td class="matnum">[0.10, 0.40]</td><td class="matnum">[0.12, 0.38]</td></tr>
+        <tr><td class="matnum">神經元 B/Y</td><td class="matnum">[-0.20, 0.30]</td><td class="matnum">[-0.18, 0.32]</td></tr>
+      </table>
+      <p>因為是第一層，<code class="inline">T_prev is None</code>，<code class="inline">Wd_cross_aligned = Wd_cross</code>（不翻譯），直接算距離矩陣：</p>
+      <table class="data">
+        <tr><th>C</th><th>mom-X [0.12,0.38]</th><th>mom-Y [-0.18,0.32]</th></tr>
+        <tr><td>dad-A [0.10,0.40]</td><td class="matnum" style="color:var(--ok)">0.0008</td><td class="matnum">0.0848</td></tr>
+        <tr><td>dad-B [-0.20,0.30]</td><td class="matnum">0.1088</td><td class="matnum" style="color:var(--ok)">0.0008</td></tr>
+      </table>
+      <p>「照順序配對」(A↔X, B↔Y) 的成本最低（0.0008+0.0008），代表這一層 dad 和 mom 的交叉區塊神經元順序恰好對得上：</p>
+      <div class="formula">T₁ <span class="op">=</span> [[1, 0], [0, 1]] &nbsp;&nbsp;（單位矩陣）</div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="e3">
+    <div class="card">
+      <h3>Step A — 用 T₁ 翻譯 Layer 2 的 dad 純通道（寫入用）</h3>
+      <table class="data">
+        <tr><th></th><th>值</th></tr>
+        <tr><td class="matnum">W<sub>d,pure</sub>（layer2）</td><td class="matnum">[[0.80, 0.20], [0.10, 0.60]]</td></tr>
+        <tr><td class="matnum">W<sub>m</sub>[:oh,ih:]（mom 自己這格原始值）</td><td class="matnum">[[0.05, 0.35], [-0.15, 0.25]]</td></tr>
+      </table>
+      <p>因為 T₁ = I，翻譯後不變：<code class="inline">aligned_dad = Wd_pure @ I = Wd_pure</code></p>
+      <div class="formula">X_md（Layer2） <span class="op">=</span> 0.5 × ([[0.80,0.20],[0.10,0.60]] <span class="op">+</span> [[0.05,0.35],[-0.15,0.25]]) <span class="op">=</span> [[0.425, 0.275], [-0.025, 0.425]]</div>
+
+      <h3>Step B — 用 T₁ 翻譯 Layer 2 的 dad 交叉區塊（算新 T 用）</h3>
+      <table class="data">
+        <tr><th></th><th>值</th></tr>
+        <tr><td class="matnum">W<sub>d</sub>[:oh,ih:]（layer2 dad 右上）</td><td class="matnum">[[0.60, 0.10], [0.30, -0.20]]</td></tr>
+        <tr><td class="matnum">W<sub>m</sub>[oh:,:ih]（layer2 mom 左下）</td><td class="matnum">[[0.25, -0.35], [0.05, 0.50]]</td></tr>
+      </table>
+      <p>因為 T₁ = I，翻譯後同樣不變：</p>
+      <div class="formula">Wd_cross_aligned（Layer2） <span class="op">=</span> [[0.60, 0.10], [0.30, -0.20]] @ I <span class="op">=</span> [[0.60, 0.10], [0.30, -0.20]]</div>
+      <p>拿翻譯後的結果去跟 <code class="inline">Wm_cross（Layer2）</code> 算距離矩陣、求解 OT，得到 <b>T₂</b>——如果有第三層，Layer 3 就會用 T₂ 重複同樣的兩件事，如此遞迴下去。</p>
+      <p style="color:var(--muted); font-size:0.88rem;">這個例子裡 T₁ 剛好是單位矩陣，翻譯前後數字一樣，不容易看出「翻譯」的效果——如果 T₁ 是交換矩陣（像第 2 分頁那種距離結構顛倒的情況），Wd_cross_aligned 的兩個數字就會被對調。</p>
+    </div>
+  </div>
+  </div><!-- /tabgroup -->
+</section>
+
+<section id="code" class="toc-scroll">
+  <h2>7. 完整原始程式碼（逐行對照）</h2>
+  <p class="subtitle">下面兩段是 <code class="inline">BipedalWalker-v3.py</code> 的<b>完整逐字內容</b>，行號跟檔案一致</p>
+
+  <div class="tabgroup">
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="c1">主函式（L2240–2334）</button>
+    <button class="tabbtn" data-tab="c2">_compute_layer_transport（L2133–2152）</button>
+  </div>
+
+  <div class="tabpanel active" id="c1">
+    <div class="codebox">
+      <div class="filebar"><span>BipedalWalker-v3.py</span><b>recursive_ot_initialize_crosstalk — L2240–2334</b></div>
+      <table>
+        <tr><td class="ln">2240</td><td><span class="kw">@torch.no_grad()</span></td></tr>
+        <tr><td class="ln">2241</td><td><span class="kw">def</span> <span class="fn">recursive_ot_initialize_crosstalk</span>(</td></tr>
+        <tr><td class="ln">2242</td><td>    child_policy: nn.Module,</td></tr>
+        <tr><td class="ln">2243</td><td>    dad_policy: nn.Module,</td></tr>
+        <tr><td class="ln">2244</td><td>    mom_policy: nn.Module,</td></tr>
+        <tr><td class="ln">2245</td><td>    env=<span class="kw">None</span>,</td></tr>
+        <tr><td class="ln">2246</td><td>    obs_batch: Optional[torch.Tensor] = <span class="kw">None</span>,</td></tr>
+        <tr><td class="ln">2247</td><td>    n_obs_samples: <span class="kw">int</span> = <span class="num">512</span>,</td></tr>
+        <tr><td class="ln">2248</td><td>):</td></tr>
+        <tr><td class="ln">2249</td><td>    <span class="str">"""</span></td></tr>
+        <tr><td class="ln">2250</td><td>    <span class="str">Recursive OT 交叉通道初始化（純通道完全不動，交叉通道對齊後取平均）：</span></td></tr>
+        <tr><td class="ln">2251</td><td></td></tr>
+        <tr><td class="ln">2252</td><td>    <span class="str">★ T 的計算依據是「交叉通道本身」，只維護單一一條 T 鏈：</span></td></tr>
+        <tr><td class="ln">2253</td><td>    <span class="str">  比對的兩個區塊選「鏡像位置」：dad 自己的 X_md 交叉區塊 Wd[:oh,ih:]（右上）</span></td></tr>
+        <tr><td class="ln">2254</td><td>    <span class="str">  vs mom 自己的 X_dm 交叉區塊 Wm[oh:,:ih]（左下），用同一個 T 處理 X_md 方向、</span></td></tr>
+        <tr><td class="ln">2255</td><td>    <span class="str">  T 的轉置處理 X_dm 方向（跟原本純通道版本用對角區塊算 T 是同一種對稱邏輯，只是換成反對角）。</span></td></tr>
+        <tr><td class="ln">2256</td><td></td></tr>
+        <tr><td class="ln">2257</td><td>    <span class="str">★ 跟論文（wasserstein_ensemble.py）一致：上一層的 T 不只用來決定「這一層寫入什麼值」，</span></td></tr>
+        <tr><td class="ln">2258</td><td>    <span class="str">  也真正參與「這一層新 T 怎麼算」——先用上一層的 T 把 dad 的交叉區塊 Wd_cross 的輸入端</span></td></tr>
+        <tr><td class="ln">2259</td><td>    <span class="str">  翻譯過（Wd_cross_aligned = Wd_cross @ T_prev），才拿翻譯後的結果去跟 mom_cross 算這一層</span></td></tr>
+        <tr><td class="ln">2260</td><td>    <span class="str">  的新 T，而不是每層各自獨立比較原始交叉權重。第一層沒有上一層可用，T_prev=None，</span></td></tr>
+        <tr><td class="ln">2261</td><td>    <span class="str">  不翻譯直接比較。</span></td></tr>
+        <tr><td class="ln">2262</td><td></td></tr>
+        <tr><td class="ln">2263</td><td>    <span class="str">- 第一層：T_0 = I（共用觀測空間），交叉通道 = 純通道權重（精確，無近似，不需要平均）。</span></td></tr>
+        <tr><td class="ln">2264</td><td>    <span class="str">  這一層結束後仍要算出 T 交給下一層，此時 T_prev 還是 None，不做輸入端翻譯，直接比較</span></td></tr>
+        <tr><td class="ln">2265</td><td>    <span class="str">  Wd_cross、Wm_cross。</span></td></tr>
+        <tr><td class="ln">2266</td><td>    <span class="str">- 第 l 層（l>=2）：</span></td></tr>
+        <tr><td class="ln">2267</td><td>    <span class="str">    X_md = 0.5 * (Wd_pure @ T_{l-1} + Wm[:oh, ih:])</span></td></tr>
+        <tr><td class="ln">2268</td><td>    <span class="str">    X_dm = 0.5 * (Wm_pure @ T_{l-1}.T + Wd[oh:, :ih])</span></td></tr>
+        <tr><td class="ln">2269</td><td>    <span class="str">  純通道維持 create_dual_channel_policy 拼接時的父/母原始權重，完全不寫入。</span></td></tr>
+        <tr><td class="ln">2270</td><td></td></tr>
+        <tr><td class="ln">2271</td><td>    <span class="str">對齊方式（ground metric）：全部層一律 weight-based，直接比較（翻譯過的）交叉權重向量的</span></td></tr>
+        <tr><td class="ln">2272</td><td>    <span class="str">數值差距，不使用真實觀測驅動的 activation-based 對齊（不需要 env/obs_batch，也不依賴</span></td></tr>
+        <tr><td class="ln">2273</td><td>    <span class="str">抽樣品質，每次結果都是確定性的）。</span></td></tr>
+        <tr><td class="ln">2274</td><td></td></tr>
+        <tr><td class="ln">2275</td><td>    <span class="str">注意：即使有平均，振幅仍可能因疊加而偏大，這裡不在初始化階段處理，改由</span></td></tr>
+        <tr><td class="ln">2276</td><td>    <span class="str">attach_crosstalk_annealing_hooks() 在訓練期間把交叉通道貢獻從 0 退火升到 1。</span></td></tr>
+        <tr><td class="ln">2277</td><td>    <span class="str">"""</span></td></tr>
+        <tr><td class="ln">2278</td><td>    <span class="fn">print</span>(<span class="str">"[Recursive OT] 逐層 OT 傳輸矩陣初始化交叉通道（依據=交叉通道，weight-based，T 鏈參與 ground metric，純通道不動）..."</span>)</td></tr>
+        <tr><td class="ln">2279</td><td>    <span class="kw">import</span> ot <span class="kw">as</span> pot  <span class="cm"># noqa: ensure imported</span></td></tr>
+        <tr><td class="ln">2280</td><td></td></tr>
+        <tr><td class="ln">2281</td><td>    SKIP_LAYERS = {<span class="str">"action_net"</span>, <span class="str">"value_net"</span>}</td></tr>
+        <tr><td class="ln">2282</td><td>    dad_modules = <span class="fn">dict</span>(dad_policy.named_modules())</td></tr>
+        <tr><td class="ln">2283</td><td>    mom_modules = <span class="fn">dict</span>(mom_policy.named_modules())</td></tr>
+        <tr><td class="ln">2284</td><td></td></tr>
+        <tr><td class="ln">2285</td><td>    layer_names = [</td></tr>
+        <tr><td class="ln">2286</td><td>        name <span class="kw">for</span> name, module <span class="kw">in</span> child_policy.named_modules()</td></tr>
+        <tr><td class="ln">2287</td><td>        <span class="kw">if</span> <span class="fn">isinstance</span>(module, nn.Linear) <span class="kw">and</span> <span class="kw">not</span> <span class="fn">any</span>(s <span class="kw">in</span> name <span class="kw">for</span> s <span class="kw">in</span> SKIP_LAYERS)</td></tr>
+        <tr><td class="ln">2288</td><td>    ]</td></tr>
+        <tr><td class="ln">2289</td><td></td></tr>
+        <tr><td class="ln">2290</td><td>    T_prev = <span class="kw">None</span>     <span class="cm"># 單一 T 鏈（None = 第一層，identity）</span></td></tr>
+        <tr><td class="ln">2291</td><td></td></tr>
+        <tr><td class="ln">2292</td><td>    <span class="kw">for</span> name <span class="kw">in</span> layer_names:</td></tr>
+        <tr><td class="ln">2293</td><td>        child_m = <span class="fn">dict</span>(child_policy.named_modules()).get(name)</td></tr>
+        <tr><td class="ln">2294</td><td>        dad_m = dad_modules.get(name)</td></tr>
+        <tr><td class="ln">2295</td><td>        mom_m = mom_modules.get(name)</td></tr>
+        <tr><td class="ln">2296</td><td>        <span class="kw">if</span> child_m <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> dad_m <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> mom_m <span class="kw">is</span> <span class="kw">None</span>:</td></tr>
+        <tr><td class="ln">2297</td><td>            <span class="kw">continue</span></td></tr>
+        <tr><td class="ln">2298</td><td></td></tr>
+        <tr><td class="ln">2299</td><td>        W = child_m.weight.data</td></tr>
+        <tr><td class="ln">2300</td><td>        oh, ih = W.shape[<span class="num">0</span>] // <span class="num">2</span>, W.shape[<span class="num">1</span>] // <span class="num">2</span></td></tr>
+        <tr><td class="ln">2301</td><td>        <span class="kw">if</span> oh == <span class="num">0</span> <span class="kw">or</span> ih == <span class="num">0</span>:</td></tr>
+        <tr><td class="ln">2302</td><td>            <span class="kw">continue</span></td></tr>
+        <tr><td class="ln">2303</td><td></td></tr>
+        <tr><td class="ln">2304</td><td>        Wd = dad_m.weight.data</td></tr>
+        <tr><td class="ln">2305</td><td>        Wm = mom_m.weight.data</td></tr>
+        <tr><td class="ln">2306</td><td></td></tr>
+        <tr><td class="ln">2307</td><td>        <span class="cm"># 純通道區塊（僅用於「寫入交叉通道」的翻譯計算，不寫回，純通道保持不動）</span></td></tr>
+        <tr><td class="ln">2308</td><td>        Wd_pure = Wd[:oh, :ih]  <span class="cm"># (oh, ih)</span></td></tr>
+        <tr><td class="ln">2309</td><td>        Wm_pure = Wm[oh:, ih:]  <span class="cm"># (oh, ih)</span></td></tr>
+        <tr><td class="ln">2310</td><td></td></tr>
+        <tr><td class="ln">2311</td><td>        <span class="cm"># 交叉通道區塊（鏡像位置：dad 的 X_md vs mom 的 X_dm，T 的計算依據）</span></td></tr>
+        <tr class="hl"><td class="ln">2312</td><td>        Wd_cross = Wd[:oh, ih:]   <span class="cm"># dad 自己的 X_md 交叉區塊（右上）</span></td></tr>
+        <tr class="hl"><td class="ln">2313</td><td>        Wm_cross = Wm[oh:, :ih]   <span class="cm"># mom 自己的 X_dm 交叉區塊（左下）</span></td></tr>
+        <tr><td class="ln">2314</td><td></td></tr>
+        <tr class="hl"><td class="ln">2315</td><td>        <span class="kw">if</span> T_prev <span class="kw">is</span> <span class="kw">None</span>:</td></tr>
+        <tr><td class="ln">2316</td><td>            <span class="cm"># 第一層：T_0 = I，交叉通道 = 純通道權重（精確，無近似，不需要平均）</span></td></tr>
+        <tr><td class="ln">2317</td><td>            W[:oh, ih:] = Wd_pure.clone()</td></tr>
+        <tr><td class="ln">2318</td><td>            W[oh:, :ih] = Wm_pure.clone()</td></tr>
+        <tr class="hl"><td class="ln">2319</td><td>            Wd_cross_aligned = Wd_cross.float()  <span class="cm"># 沒有上一層 T，不翻譯</span></td></tr>
+        <tr><td class="ln">2320</td><td>        <span class="kw">else</span>:</td></tr>
+        <tr><td class="ln">2321</td><td>            <span class="cm"># 深層：交叉通道 = 0.5 * (OT 翻譯值 + 對方自己那格的交叉通道)</span></td></tr>
+        <tr><td class="ln">2322</td><td>            aligned_dad = (Wd_pure.float() @ T_prev.to(Wd_pure.device))</td></tr>
+        <tr><td class="ln">2323</td><td>            aligned_mom = (Wm_pure.float() @ T_prev.t().to(Wm_pure.device))</td></tr>
+        <tr><td class="ln">2324</td><td>            W[:oh, ih:] = (<span class="num">0.5</span> * (aligned_dad + Wm[:oh, ih:].float())).to(W.dtype)</td></tr>
+        <tr><td class="ln">2325</td><td>            W[oh:, :ih] = (<span class="num">0.5</span> * (aligned_mom + Wd[oh:, :ih].float())).to(W.dtype)</td></tr>
+        <tr><td class="ln">2326</td><td></td></tr>
+        <tr><td class="ln">2327</td><td>            <span class="cm"># ★ 跟論文一致：先用上一層的 T 翻譯 dad 交叉區塊的輸入端，再拿去算這一層的新 T</span></td></tr>
+        <tr class="hl"><td class="ln">2328</td><td>            Wd_cross_aligned = (Wd_cross.float() @ T_prev.to(Wd_cross.device))</td></tr>
+        <tr><td class="ln">2329</td><td></td></tr>
+        <tr><td class="ln">2330</td><td>        <span class="cm"># 計算本層的 T（用翻譯過的 Wd_cross_aligned，而非原始 Wd_cross），傳遞給下一層</span></td></tr>
+        <tr><td class="ln">2331</td><td>        <span class="cm"># 全部層一律 weight-based：直接比較（翻譯過的）交叉權重向量</span></td></tr>
+        <tr class="hl"><td class="ln">2332</td><td>        T_prev = <span class="fn">_compute_layer_transport</span>(Wd_cross_aligned, Wm_cross)</td></tr>
+        <tr><td class="ln">2333</td><td></td></tr>
+        <tr><td class="ln">2334</td><td>    <span class="fn">print</span>(<span class="str">"[Recursive OT] 完成。"</span>)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="c2">
+    <p style="color:var(--muted); font-size:0.88rem;">被 Step 3 呼叫的唯一對齊函式，現在是全流程共用的 ground metric 計算方式。</p>
+    <div class="codebox">
+      <div class="filebar"><span>BipedalWalker-v3.py</span><b>_compute_layer_transport — L2133–2152</b></div>
+      <table>
+        <tr><td class="ln">2133</td><td><span class="kw">def</span> <span class="fn">_compute_layer_transport</span>(dad_W: torch.Tensor, mom_W: torch.Tensor, eps: <span class="kw">float</span> = <span class="num">1e-7</span>) -> torch.Tensor:</td></tr>
+        <tr><td class="ln">2134</td><td>    <span class="str">"""</span></td></tr>
+        <tr><td class="ln">2135</td><td>    <span class="str">計算 dad 和 mom 純通道權重之間的 OT 傳輸矩陣 T。</span></td></tr>
+        <tr><td class="ln">2136</td><td>    <span class="str">T[i,j] = dad 第 i 顆輸出神經元對應 mom 第 j 顆的權重。</span></td></tr>
+        <tr><td class="ln">2137</td><td>    <span class="str">Column-normalize 使每列和=1（軟置換）。</span></td></tr>
+        <tr><td class="ln">2138</td><td>    <span class="str">返回 (n, n) float tensor，在 dad_W.device 上。</span></td></tr>
+        <tr><td class="ln">2139</td><td>    <span class="str">"""</span></td></tr>
+        <tr><td class="ln">2140</td><td>    <span class="kw">import</span> ot <span class="kw">as</span> pot</td></tr>
+        <tr><td class="ln">2141</td><td>    n = dad_W.shape[<span class="num">0</span>]</td></tr>
+        <tr class="hl"><td class="ln">2142</td><td>    d = dad_W.float().reshape(n, -<span class="num">1</span>)</td></tr>
+        <tr class="hl"><td class="ln">2143</td><td>    m = mom_W.float().reshape(n, -<span class="num">1</span>)</td></tr>
+        <tr class="hl"><td class="ln">2144</td><td>    diff = d.unsqueeze(<span class="num">1</span>) - m.unsqueeze(<span class="num">0</span>)</td></tr>
+        <tr class="hl"><td class="ln">2145</td><td>    C = (diff ** <span class="num">2</span>).sum(dim=-<span class="num">1</span>).cpu().numpy()</td></tr>
+        <tr><td class="ln">2146</td><td>    mu = np.ones(n, dtype=np.float64) / n</td></tr>
+        <tr><td class="ln">2147</td><td>    nu = np.ones(n, dtype=np.float64) / n</td></tr>
+        <tr class="hl"><td class="ln">2148</td><td>    T = pot.emd(mu, nu, C)</td></tr>
+        <tr><td class="ln">2149</td><td>    T_var = torch.from_numpy(T).float().to(dad_W.device)</td></tr>
+        <tr><td class="ln">2150</td><td>    col_sums = T_var.sum(dim=<span class="num">0</span>).clamp(min=eps)</td></tr>
+        <tr class="hl"><td class="ln">2151</td><td>    T_var = T_var / col_sums.unsqueeze(<span class="num">0</span>)</td></tr>
+        <tr><td class="ln">2152</td><td>    <span class="kw">return</span> T_var  <span class="cm"># (n, n)</span></td></tr>
+      </table>
+    </div>
+  </div>
+  </div><!-- /tabgroup -->
+
+  <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">完整檔案位置：<code class="inline">BipedalWalker-v3_ppo/BipedalWalker-v3.py</code></p>
+</section>
+
+<section id="caveats" class="toc-scroll">
+  <h2>8. 已知限制（實驗誠實記錄）</h2>
+  <div class="card warn">
+    <h3>純初始化階段，子代目前還無法直接可用</h3>
+    <p>在這個專案的實測中，不管公式怎麼調整（含這次簡化成全部 weight-based），只要<b>沒有搭配真正的梯度訓練</b>（蒸餾或線上 RL），子代評估 reward 都落在 -77 ~ -133 這個「機器人幾乎立刻摔倒」的區間，遠低於雙親各自 ~308 分的水準。</p>
+    <p>目前最可信的解釋：子代初始表現太差時，episode 很快結束，線上 PPO rollout 收集不到有效訓練訊號，形成惡性循環；真正修正殘留誤差可能仍需要密集監督訊號（蒸餾）介入。</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  BipedalWalker-v3 GA 融合專案 · recursive_ot_initialize_crosstalk 技術文件（已更新至全 weight-based 版）
+</footer>
+
+<script>
+document.querySelectorAll('.tabbtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const tab = btn.dataset.tab;
+    const scope = btn.closest('.tabgroup') || document;
+    scope.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+    scope.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(tab).classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

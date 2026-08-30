@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ot_mutual 雙通道融合 — 完整流程與收斂結果報告（v2：官方單向對齊版）</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F4F0;color:#1A1915;padding:32px;line-height:1.65}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:21px;font-weight:700;margin-bottom:6px}
+.sub{font-size:13px;color:#6B6960;margin-bottom:26px}
+h2{font-size:15px;font-weight:600;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid #E5E3DB;display:flex;align-items:center;gap:8px}
+h2 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#2563EB;color:#fff;font-size:12px;font-weight:700;flex-shrink:0}
+h3{font-size:13.5px;font-weight:600;margin:16px 0 8px}
+p{font-size:13px;color:#33322E;margin-bottom:10px}
+code{font-family:'Consolas','Cascadia Code',monospace;font-size:12px;background:#EDEBE3;padding:1px 5px;border-radius:3px;color:#1A1915}
+.card{background:#FFFFFF;border:1px solid #E5E3DB;border-radius:10px;padding:18px 20px;margin-bottom:16px}
+.flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:14px 0}
+.fbox{background:#EEF4FF;border:1px solid #93B4F7;color:#1E40AF;border-radius:8px;padding:9px 13px;font-size:12px;font-weight:500;text-align:center;min-width:110px}
+.fbox.gray{background:#F1EFE8;border-color:#D5D3CC;color:#6B6960}
+.fbox.warn{background:#FDECEC;border-color:#F3B4B4;color:#9B1C1C}
+.fbox.teal{background:#E1F5EE;border-color:#5DCAA5;color:#085041}
+.arrow{color:#B5B2A6;font-size:16px}
+pre{background:#2B2A27;border-radius:8px;padding:14px 16px;overflow-x:auto;font-family:'Consolas','Cascadia Code',monospace;font-size:11.6px;line-height:1.75;color:#D4D0C4;margin:10px 0}
+.kw{color:#C084FC}.fn{color:#F97316}.cm{color:#6B7280;font-style:italic}.nm{color:#FBBF24}.vr{color:#93C5FD}
+.matrix-demo{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin:14px 0}
+.mg{display:grid;gap:2px}
+.ce{width:150px;height:70px;display:flex;align-items:center;justify-content:center;font-size:11px;font-family:'Consolas',monospace;border-radius:3px;font-weight:600;text-align:center;padding:6px}
+.c-dd{background:#CECBF6;color:#3C3489}
+.c-mm{background:#9FE1CB;color:#085041}
+.c-md{background:#B5D4F4;color:#0C447C}
+.c-dm{background:#F7C1C1;color:#791F1F}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:#444340;margin-top:10px}
+.lg{display:flex;align-items:center;gap:5px}
+.sw{width:13px;height:13px;border-radius:3px;display:inline-block}
+.hbox{border-left:3px solid #93B4F7;padding:9px 12px;background:#EEF4FF;border-radius:0 6px 6px 0;font-size:12.5px;color:#1E3A8A;margin:10px 0;line-height:1.7}
+.hbox.warn{border-left-color:#EF4444;background:#FEF2F2;color:#991B1B}
+.hbox.ok{border-left-color:#22C55E;background:#F0FDF4;color:#166534}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+th,td{border:1px solid #E5E3DB;padding:8px 10px;text-align:center}
+th{background:#F5F4F0;font-weight:600;color:#33322E}
+.tag{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:10px;background:#F1EFE8;color:#6B6960;font-weight:500}
+.tag.red{background:#FDECEC;color:#9B1C1C}
+.tag.blue{background:#EEF4FF;color:#1E40AF}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+.stat{background:#F5F4F0;border-radius:8px;padding:12px;text-align:center}
+.stat .v{font-size:18px;font-weight:700;color:#1A1915}
+.stat .l{font-size:10.5px;color:#6B6960;margin-top:2px}
+.footer{margin-top:30px;padding-top:16px;border-top:1px solid #E5E3DB;font-size:11.5px;color:#999690}
+.axis-label{font-size:10px;fill:#888780;font-family:'Consolas',monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>ot_mutual 雙通道融合 — 完整流程與收斂結果（v2：官方單向對齊版）</h1>
+<div class="sub">對應程式：BipedalWalker-v3_ppo/BipedalWalker-v3.py · mutual_ot_initialize_crosstalk（目前版本：借鏡 otfusion 官方「單向翻譯＋平均」設計）</div>
+
+<h2><span class="num">1</span>整體流程</h2>
+<div class="card">
+<div class="flow">
+  <div class="fbox gray">載入 dad / mom<br><span style="font-weight:400">PPO.load，各自獨立訓練</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox">建構雙通道網路<br><span style="font-weight:400">create_dual_channel_policy</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox">初始翻譯（seed）<br><span style="font-weight:400">T_prev 逐層傳遞</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox teal">疊代收斂 X_dm<br><span style="font-weight:400">最多100輪，見第3節</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox warn">蒸餾 epochs=0<br><span style="font-weight:400">刻意跳過，不微調</span></div>
+  <div class="arrow">→</div>
+  <div class="fbox gray">評估 child<br><span style="font-weight:400">3 episodes 平均reward</span></div>
+</div>
+<p>本次執行參數：<code>--crossover ot_mutual --ties_n_eval 3</code>，dad = model3.zip、mom = model2.zip（各自獨立訓練，無共同祖先）。</p>
+</div>
+
+<h2><span class="num">2</span>資料結構：權重矩陣的四個象限</h2>
+<div class="card">
+<p><code>create_dual_channel_policy</code> 把每個隱藏層（64→64）拆成「輸出上半＝dad、下半＝mom」，因為上一層輸出同樣是上32＝dad、下32＝mom，所以每個權重矩陣 <code>W</code> 可視為 2×2 區塊（<code>oh=ih=32</code>）：</p>
+<div class="matrix-demo">
+  <div class="mg" style="grid-template-columns:repeat(2,1fr)">
+    <div class="ce c-dd">純 dad→dad<br>（全程不動）</div>
+    <div class="ce c-md">X_md：dad→mom<br><b>model1，全程不動</b></div>
+    <div class="ce c-dm">X_dm：mom→dad<br><b>model0，每輪被翻譯＋更新</b></div>
+    <div class="ce c-mm">純 mom→mom<br>（全程不動）</div>
+  </div>
+</div>
+<div class="legend">
+  <span class="lg"><span class="sw" style="background:#CECBF6"></span>左上：dad 神經元收 dad 自己的輸入，從未被破壞</span>
+  <span class="lg"><span class="sw" style="background:#9FE1CB"></span>右下：mom 神經元收 mom 自己的輸入，從未被破壞</span>
+  <span class="lg"><span class="sw" style="background:#B5D4F4"></span>X_md：扮演 otfusion 裡的「model1」，永遠是原始 seed 值，從不寫入</span>
+  <span class="lg"><span class="sw" style="background:#F7C1C1"></span>X_dm：扮演 otfusion 裡的「model0」，每輪被 T 翻譯、跟 X_md 平均後覆寫</span>
+</div>
+<div class="hbox"><code>action_net</code>（輸出馬達扭矩，64→4）整層固定用 dad 權重，不參與拆分／對齊；<code>value_net</code> 因輸出維度是 1（奇數）也整層跳過。</div>
+</div>
+
+<h2><span class="num">3</span>每一輪疊代裡實際發生的事（官方單向對齊設計）</h2>
+<div class="card">
+<h3>3.1　疊代前：初始翻譯（seed，只做一次）</h3>
+<pre><span class="vr">T_prev</span> = <span class="kw">None</span>
+<span class="kw">for</span> name <span class="kw">in</span> layer_names:
+    Wd_pure = dad_m.weight.data[:oh, :ih]   <span class="cm"># dad 自己的純區塊（左上）</span>
+    Wm_pure = mom_m.weight.data[oh:, ih:]   <span class="cm"># mom 自己的純區塊（右下）</span>
+    <span class="kw">if</span> T_prev <span class="kw">is</span> <span class="kw">None</span>:
+        W[:oh, ih:] = Wd_pure.clone()       <span class="cm"># X_md 初始值：dad 純區塊</span>
+        W[oh:, :ih] = Wm_pure.clone()       <span class="cm"># X_dm 初始值：mom 純區塊</span>
+    <span class="kw">else</span>:
+        W[:oh, ih:] = Wd_pure @ T_prev
+        W[oh:, :ih] = Wm_pure @ T_prev.t()
+    T_prev = _compute_layer_transport(Wd_pure, Wm_pure)</pre>
+
+<h3>3.2　每一輪的五個步驟（本次版本：X_md 當 model1 全程不動、X_dm 當 model0，內部逐層鏈式傳遞 T）</h3>
+<pre><span class="kw">for</span> it <span class="kw">in</span> <span class="fn">range</span>(n_iters):                       <span class="cm"># 最多 100 輪</span>
+
+    <span class="cm"># 步驟 ① 蒐集本輪 child 網路的真實 activation（一次前向傳播，抓齊所有層）</span>
+    child_acts = _collect_pure_activations(child_policy, obs_batch, layer_names)
+
+    T_prev = <span class="kw">None</span>  <span class="cm"># 這一輪逐層鏈式傳遞用</span>
+    <span class="kw">for</span> name <span class="kw">in</span> layer_names:
+        X_md = W[:oh, ih:]        <span class="cm"># model1：只讀取，全程不寫入</span>
+        X_dm = W[oh:, :ih]        <span class="cm"># model0：這輪要被翻譯、更新的對象</span>
+
+        <span class="cm"># 步驟 ② 先用「上一層」算出的 T，校正這一層的 X_dm</span>
+        <span class="kw">if</span> T_prev <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:
+            X_dm = T_prev @ X_dm
+
+        <span class="cm"># 步驟 ③ 用真實 activation 算「這一層自己」的 OT 傳輸矩陣 T</span>
+        acts_upper = acts[:, :oh]   <span class="cm"># dad 神經元的真實 activation（256, 32）</span>
+        acts_lower = acts[:, oh:]   <span class="cm"># mom 神經元的真實 activation（256, 32）</span>
+        T = _compute_layer_transport_from_acts(acts_upper, acts_lower)
+
+        <span class="cm"># 步驟 ④ 把（校正過的）X_dm 翻譯到 X_md 座標系，再跟完全沒動過的 X_md 平均</span>
+        t_dm = T @ X_dm
+        X_dm_new = <span class="nm">0.5</span> * (t_dm + X_md)
+        W[oh:, :ih] = X_dm_new      <span class="cm"># 寫回交叉通道；X_md 完全不寫入</span>
+
+        T_prev = T                  <span class="cm"># 把這一層的 T 留給下一層鏈式使用</span>
+
+    <span class="cm"># 步驟 ⑤ 計算 X_dm 離目標 X_md 還有多遠，測試「有沒有逐漸對齊」</span>
+    gap = ||這輪所有層的 X_dm_new - X_md||
+    <span class="kw">if</span> gap &lt; tol:  <span class="cm"># tol = 1e-3</span>
+        <span class="kw">break</span></pre>
+<div class="hbox">這個設計借鏡兩個地方：翻譯／平均公式借鏡 otfusion 官方的 <code>geometric_fc = (T.t()@model0權重 + model1權重) / 2</code>（只翻譯「會動的一方」、跟「完全不動的目標」平均）；逐層鏈式傳遞 <code>T_prev</code> 則借鏡官方 <code>aligned_wt = fc_layer0_weight @ T_var</code> 的做法——上一層的對齊結果，會先修正這一層的資料，再讓這一層算自己的 T，而不是每層各自獨立、互不相關。<code>X_md</code> 固定不動是因為 <code>action_net</code> 完全沿用 dad 權重，我們希望最終隱藏向量盡量貼近 dad 自己網路原本的分佈。</div>
+</div>
+
+<h2><span class="num">4</span>實測結果：X_md、X_dm 有沒有逐漸對齊？</h2>
+<div class="card">
+<div class="hbox warn"><b>資料來源說明：</b>以下圖表是加入「逐層鏈式傳遞 T」（3.2 節步驟②、⑤）之前跑出來的結果，當時每層還是各自獨立算 T。加入鏈式傳遞後尚未重新實測，這部分待補上新數據。</div>
+<p>用新公式（第 3 節）重新測過，這次追蹤的指標改成 <code>|X_dm − X_md|</code>——直接測「這輪的 X_dm 離固定不動的 X_md 還有多遠」，用來回答「兩者是否逐漸對齊」這個問題，而不是像之前那樣只看「這輪動了多少」。</p>
+<svg width="100%" viewBox="0 0 680 300" role="img" aria-label="X_dm 與 X_md 的差距隨疊代輪數變化的折線圖">
+<line x1="60" y1="260" x2="620" y2="260" stroke="#D5D3CC" stroke-width="1"/>
+<line x1="60" y1="20" x2="60" y2="260" stroke="#D5D3CC" stroke-width="1"/>
+<text x="55" y="264" class="axis-label" text-anchor="end">7.5</text>
+<text x="55" y="145" class="axis-label" text-anchor="end">9.0</text>
+<text x="55" y="26" class="axis-label" text-anchor="end">10.5</text>
+<text x="60" y="278" class="axis-label">iter 1</text>
+<text x="600" y="278" class="axis-label">iter 100</text>
+<polyline points="60.0,26.8 65.7,135.9 71.3,160.8 77.0,199.2 82.6,169.7 88.3,195.8 93.9,199.5 99.6,173.9 105.3,178.7 110.9,170.9 116.6,175.0 122.2,189.8 127.9,185.2 133.5,192.6 139.2,187.8 144.8,159.3 150.5,191.3 156.2,201.5 161.8,190.4 167.5,203.7 173.1,192.3 178.8,185.6 184.4,173.5 190.1,185.7 195.8,185.1 201.4,191.9 207.1,193.6 212.7,168.8 218.4,160.4 224.0,177.0 229.7,191.8 235.4,202.9 241.0,191.3 246.7,166.9 252.3,203.6 258.0,192.9 263.6,171.5 269.3,188.4 274.9,182.8 280.6,165.1 286.3,184.2 291.9,194.6 297.6,176.0 303.2,190.9 308.9,189.3 314.5,168.8 320.2,163.8 325.9,185.5 331.5,192.6 337.2,180.4 342.8,183.9 348.5,166.8 354.1,180.6 359.8,188.5 365.5,190.3 371.1,190.7 376.8,198.7 382.4,181.0 388.1,173.4 393.7,211.9 399.4,206.5 405.1,212.4 410.7,174.8 416.4,167.0 422.0,187.9 427.7,188.3 433.3,185.3 439.0,206.9 444.6,176.4 450.3,195.8 456.0,194.1 461.6,192.5 467.3,181.4 472.9,173.4 478.6,191.4 484.2,164.6 489.9,177.4 495.6,182.0 501.2,179.5 506.9,185.7 512.5,192.1 518.2,190.5 523.8,186.0 529.5,182.9 535.2,187.5 540.8,173.9 546.5,184.1 552.1,159.3 557.8,175.7 563.4,189.9 569.1,196.7 574.7,185.5 580.4,182.5 586.1,166.5 591.7,176.8 597.4,185.9 603.0,174.0 608.7,195.2 614.3,193.5 620.0,187.8"
+  fill="none" stroke="#2563EB" stroke-width="1.6"/>
+<text x="340" y="14" class="axis-label" text-anchor="middle" font-size="11" fill="#1A1915">|X_dm − X_md| 隨疊代輪數變化（y 軸：7.5～10.5）</text>
+</svg>
+<div class="stat-grid">
+  <div class="stat"><div class="v">10.42</div><div class="l">第1輪（最大值）</div></div>
+  <div class="stat"><div class="v">8.09</div><div class="l">第62輪（最小值）</div></div>
+  <div class="stat"><div class="v">8.44</div><div class="l">第7～100輪平均值</div></div>
+  <div class="stat"><div class="v">0.14</div><div class="l">第7～100輪標準差</div></div>
+</div>
+<h3>怎麼解讀這個結果</h3>
+<div class="hbox">第 1～6 輪差距快速從 <code>10.42</code> 降到 <code>8.2~8.6</code>，但第 7 輪之後就<b>卡在 8.1～8.76 之間，完全沒有繼續往 0 靠近</b>。</div>
+<div class="hbox ok"><b>這不代表 OT 對齊失敗。</b>差距不會收斂到 0，其實是預期中的結果：<code>X_md</code>（dad 自己的權重）跟 <code>X_dm</code>（mom 翻譯後再跟 X_md 平均出來的權重）本來就應該保持不同——公式裡有「平均」這個動作，<code>X_dm_new</code> 定義上就不會等於 <code>X_md</code>，除非翻譯後的 <code>t_dm</code> 剛好也等於 <code>X_md</code>。所以「差距趨近 0」從一開始就不是正確的收斂目標。</div>
+<div class="hbox warn"><b>但真正該關注的是：這個差距本身有沒有穩定下來。</b>答案是<b>沒有</b>——第 7 輪之後這個值仍在 8.1～8.76 之間持續隨機跳動（標準差 0.14），代表 <code>X_dm</code> 每一輪都還在小幅度改變，沒有真正定下來。這跟我們先前多次遇到的問題同源：<code>T</code> 每輪重新用當下的 activation 重算，EMD 精確解在配對成本打平的局面下容易在相近方案間跳動，導致 <code>X_dm</code> 一直有殘餘的抖動。</div>
+</div>
+
+<h2><span class="num">5</span>與 otfusion 官方設計的對照</h2>
+<div class="card">
+<table>
+<tr><th>項目</th><th>otfusion 官方</th><th>本專案 ot_mutual（目前版本）</th></tr>
+<tr><td>對齊對象</td><td>兩個各自獨立訓練的完整模型</td><td>同一個權重矩陣裡的兩個交叉區塊（X_md、X_dm）</td></tr>
+<tr><td>翻譯方向</td><td>只翻譯 model0，model1 完全不動</td><td>只翻譯 X_dm（model0角色），X_md（model1角色）完全不動</td></tr>
+<tr><td>平均公式</td><td><code>(T.t()@model0 + model1) / 2</code></td><td><code>(T@X_dm + X_md) / 2</code></td></tr>
+<tr><td>是否疊代</td><td>否，逐層單次通過，從第一層到最後一層各算一次 T</td><td>是，同一組區塊反覆疊代最多 100 輪</td></tr>
+<tr><td>成本矩陣依據</td><td>weight 或 activation，可切換</td><td>activation-based（256 筆觀測）</td></tr>
+<tr><td>層與層之間是否鏈式傳遞 T</td><td>是，<code>aligned_wt = fc_layer0_weight @ T_var</code></td><td>是（新加入）：每輪內部，上一層的 T 先修正這一層的 X_dm，再算這層自己的 T</td></tr>
+</table>
+<div class="hbox">最大的結構差異在於「要不要疊代」：官方完全不需要疊代收斂，因為它的成本矩陣是拿「兩個訓練好、穩定不變」的模型權重比較，一次算完就結束；我們的 <code>X_md</code>、<code>X_dm</code> 本身不是訓練出來的獨立實體，只是同一個網路裡待填的占位權重，套用「單向翻譯＋平均」的公式後，理論上應該用同官方一樣「算一次就好」，而不必疊代 100 輪——這點可以在下次測試時驗證：只跑 1 輪 vs 跑滿 100 輪，child 表現是否有差異。「層與層是否鏈式傳遞 T」這點原本是本專案跟官方的差異之一，現在已經補上，讓每輪內部逐層處理的方式更貼近官方設計。</div>
+</div>
+
+<h2><span class="num">6</span>下一步待討論</h2>
+<div class="card">
+<p>1. 用「加入逐層鏈式傳遞 T」之後的版本重新實測，補上第 4 節的收斂數據（目前圖表是鏈式傳遞加入前的舊數據）。</p>
+<p>2. 解決 <code>X_dm</code> 本身還沒穩定的問題：改用 Sinkhorn（熵正則化 OT）取代精確 EMD，避免配對在打平局面下反覆跳動，讓 <code>|X_dm - X_md|</code> 的震盪幅度真正收斂到一個穩定值，而不是持續在 ±0.3 內隨機跳動。</p>
+<p>3. 驗證「疊代是否真的必要」：既然公式已經改成官方單向設計，理論上不需要疊代收斂，可以比較 <code>n_iters=1</code> 跟 <code>n_iters=100</code> 的 child 表現差異。</p>
+<p>4. 承接先前結論：不論 OT 疊代收斂品質好壞，child 目前都落在 -100～-116 分（dad/mom 約 308），根本原因是 dad、mom 沒有共同祖先、零微調——OT 對齊再精準也只是統計上的猜測，不是真正的功能對應。</p>
+</div>
+
+<div class="footer">產生時間：2026-07-10　|　對應程式碼：BipedalWalker-v3_ppo/BipedalWalker-v3.py（create_dual_channel_policy, mutual_ot_initialize_crosstalk, _compute_layer_transport_from_acts）｜參考實作：otfusion-master（Singh &amp; Jaggi, wasserstein_ensemble.py）</div>
+</div>
+</body>
+</html>

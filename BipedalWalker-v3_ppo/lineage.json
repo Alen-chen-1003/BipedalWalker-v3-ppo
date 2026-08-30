@@ -1,0 +1,1978 @@
+{
+  "gen4_ind1": {
+    "generation": 4,
+    "id": 1,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen4_ind2": {
+    "generation": 4,
+    "id": 2,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen4_ind3": {
+    "generation": 4,
+    "id": 3,
+    "parents": [
+      "child_gen1_model3_x_model4.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen4_ind4": {
+    "generation": 4,
+    "id": 4,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen4_ind5": {
+    "generation": 4,
+    "id": 5,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen4_ind6": {
+    "generation": 4,
+    "id": 6,
+    "parents": [
+      "child_gen2_child_gen1_model11_x_mpdel10_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind7": {
+    "generation": 4,
+    "id": 7,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind8": {
+    "generation": 4,
+    "id": 8,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind9": {
+    "generation": 4,
+    "id": 9,
+    "parents": [
+      "child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind10": {
+    "generation": 4,
+    "id": 10,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind11": {
+    "generation": 4,
+    "id": 11,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind12": {
+    "generation": 4,
+    "id": 12,
+    "parents": [
+      "child_gen1_model3_x_model4.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind13": {
+    "generation": 4,
+    "id": 13,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind14": {
+    "generation": 4,
+    "id": 14,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen4_ind15": {
+    "generation": 4,
+    "id": 15,
+    "parents": [
+      "child_gen2_child_gen1_model11_x_mpdel10_x_child_gen1_model6_x_model2.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind16": {
+    "generation": 4,
+    "id": 16,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind17": {
+    "generation": 4,
+    "id": 17,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model6_x_model3.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind18": {
+    "generation": 4,
+    "id": 18,
+    "parents": [
+      "child_gen1_model2_x_model3.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind19": {
+    "generation": 4,
+    "id": 19,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind20": {
+    "generation": 4,
+    "id": 20,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind21": {
+    "generation": 4,
+    "id": 21,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind22": {
+    "generation": 4,
+    "id": 22,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind23": {
+    "generation": 4,
+    "id": 23,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen1_model3_x_model4.pkl"
+    ]
+  },
+  "gen4_ind24": {
+    "generation": 4,
+    "id": 24,
+    "parents": [
+      "child_gen2_child_gen1_model11_x_mpdel10_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind25": {
+    "generation": 4,
+    "id": 25,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind26": {
+    "generation": 4,
+    "id": 26,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind27": {
+    "generation": 4,
+    "id": 27,
+    "parents": [
+      "child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind28": {
+    "generation": 4,
+    "id": 28,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind29": {
+    "generation": 4,
+    "id": 29,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind30": {
+    "generation": 4,
+    "id": 30,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind31": {
+    "generation": 4,
+    "id": 31,
+    "parents": [
+      "child_gen1_model3_x_model4.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind32": {
+    "generation": 4,
+    "id": 32,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl"
+    ]
+  },
+  "gen4_ind33": {
+    "generation": 4,
+    "id": 33,
+    "parents": [
+      "child_gen2_child_gen1_model11_x_mpdel10_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind34": {
+    "generation": 4,
+    "id": 34,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model3_x_child_gen1_model6_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind35": {
+    "generation": 4,
+    "id": 35,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind36": {
+    "generation": 4,
+    "id": 36,
+    "parents": [
+      "child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind37": {
+    "generation": 4,
+    "id": 37,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind38": {
+    "generation": 4,
+    "id": 38,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind39": {
+    "generation": 4,
+    "id": 39,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind40": {
+    "generation": 4,
+    "id": 40,
+    "parents": [
+      "child_gen1_model3_x_model4.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen4_ind41": {
+    "generation": 4,
+    "id": 41,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model11_x_child_gen1_model6_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model3_x_child_gen1_model6_x_model7.pkl"
+    ]
+  },
+  "gen5_ind1": {
+    "generation": 5,
+    "id": 1,
+    "parents": [
+      "gen4_ind29.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind2": {
+    "generation": 5,
+    "id": 2,
+    "parents": [
+      "gen4_ind27.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind3": {
+    "generation": 5,
+    "id": 3,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind4": {
+    "generation": 5,
+    "id": 4,
+    "parents": [
+      "gen4_ind25.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind5": {
+    "generation": 5,
+    "id": 5,
+    "parents": [
+      "gen4_ind21.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind6": {
+    "generation": 5,
+    "id": 6,
+    "parents": [
+      "gen4_ind17.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind7": {
+    "generation": 5,
+    "id": 7,
+    "parents": [
+      "gen4_ind18.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind8": {
+    "generation": 5,
+    "id": 8,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind9": {
+    "generation": 5,
+    "id": 9,
+    "parents": [
+      "gen4_ind37.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen5_ind10": {
+    "generation": 5,
+    "id": 10,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind11": {
+    "generation": 5,
+    "id": 11,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind12": {
+    "generation": 5,
+    "id": 12,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind13": {
+    "generation": 5,
+    "id": 13,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind14": {
+    "generation": 5,
+    "id": 14,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind15": {
+    "generation": 5,
+    "id": 15,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind16": {
+    "generation": 5,
+    "id": 16,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind17": {
+    "generation": 5,
+    "id": 17,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind18": {
+    "generation": 5,
+    "id": 18,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind29.pkl"
+    ]
+  },
+  "gen5_ind19": {
+    "generation": 5,
+    "id": 19,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind20": {
+    "generation": 5,
+    "id": 20,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind21": {
+    "generation": 5,
+    "id": 21,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind22": {
+    "generation": 5,
+    "id": 22,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind23": {
+    "generation": 5,
+    "id": 23,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind24": {
+    "generation": 5,
+    "id": 24,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind25": {
+    "generation": 5,
+    "id": 25,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind26": {
+    "generation": 5,
+    "id": 26,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind27": {
+    "generation": 5,
+    "id": 27,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind27.pkl"
+    ]
+  },
+  "gen5_ind28": {
+    "generation": 5,
+    "id": 28,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind29": {
+    "generation": 5,
+    "id": 29,
+    "parents": [
+      "gen4_ind29.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind30": {
+    "generation": 5,
+    "id": 30,
+    "parents": [
+      "gen4_ind27.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind31": {
+    "generation": 5,
+    "id": 31,
+    "parents": [
+      "gen4_ind25.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind32": {
+    "generation": 5,
+    "id": 32,
+    "parents": [
+      "gen4_ind21.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind33": {
+    "generation": 5,
+    "id": 33,
+    "parents": [
+      "gen4_ind17.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind34": {
+    "generation": 5,
+    "id": 34,
+    "parents": [
+      "gen4_ind18.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind35": {
+    "generation": 5,
+    "id": 35,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind36": {
+    "generation": 5,
+    "id": 36,
+    "parents": [
+      "gen4_ind37.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl"
+    ]
+  },
+  "gen5_ind37": {
+    "generation": 5,
+    "id": 37,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind38": {
+    "generation": 5,
+    "id": 38,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind39": {
+    "generation": 5,
+    "id": 39,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind40": {
+    "generation": 5,
+    "id": 40,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind41": {
+    "generation": 5,
+    "id": 41,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind42": {
+    "generation": 5,
+    "id": 42,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind43": {
+    "generation": 5,
+    "id": 43,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind44": {
+    "generation": 5,
+    "id": 44,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind45": {
+    "generation": 5,
+    "id": 45,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind25.pkl"
+    ]
+  },
+  "gen5_ind46": {
+    "generation": 5,
+    "id": 46,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind47": {
+    "generation": 5,
+    "id": 47,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind48": {
+    "generation": 5,
+    "id": 48,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind49": {
+    "generation": 5,
+    "id": 49,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind50": {
+    "generation": 5,
+    "id": 50,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind51": {
+    "generation": 5,
+    "id": 51,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind52": {
+    "generation": 5,
+    "id": 52,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind53": {
+    "generation": 5,
+    "id": 53,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind54": {
+    "generation": 5,
+    "id": 54,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind21.pkl"
+    ]
+  },
+  "gen5_ind55": {
+    "generation": 5,
+    "id": 55,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind56": {
+    "generation": 5,
+    "id": 56,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind57": {
+    "generation": 5,
+    "id": 57,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind58": {
+    "generation": 5,
+    "id": 58,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind59": {
+    "generation": 5,
+    "id": 59,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind60": {
+    "generation": 5,
+    "id": 60,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind61": {
+    "generation": 5,
+    "id": 61,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind62": {
+    "generation": 5,
+    "id": 62,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind63": {
+    "generation": 5,
+    "id": 63,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind17.pkl"
+    ]
+  },
+  "gen5_ind64": {
+    "generation": 5,
+    "id": 64,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind65": {
+    "generation": 5,
+    "id": 65,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind66": {
+    "generation": 5,
+    "id": 66,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind67": {
+    "generation": 5,
+    "id": 67,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind68": {
+    "generation": 5,
+    "id": 68,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind69": {
+    "generation": 5,
+    "id": 69,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind70": {
+    "generation": 5,
+    "id": 70,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind71": {
+    "generation": 5,
+    "id": 71,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind72": {
+    "generation": 5,
+    "id": 72,
+    "parents": [
+      "gen4_ind37.pkl",
+      "gen4_ind18.pkl"
+    ]
+  },
+  "gen5_ind73": {
+    "generation": 5,
+    "id": 73,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind74": {
+    "generation": 5,
+    "id": 74,
+    "parents": [
+      "gen4_ind29.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind75": {
+    "generation": 5,
+    "id": 75,
+    "parents": [
+      "gen4_ind27.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind76": {
+    "generation": 5,
+    "id": 76,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind77": {
+    "generation": 5,
+    "id": 77,
+    "parents": [
+      "gen4_ind25.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind78": {
+    "generation": 5,
+    "id": 78,
+    "parents": [
+      "gen4_ind21.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind79": {
+    "generation": 5,
+    "id": 79,
+    "parents": [
+      "gen4_ind17.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind80": {
+    "generation": 5,
+    "id": 80,
+    "parents": [
+      "gen4_ind18.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind81": {
+    "generation": 5,
+    "id": 81,
+    "parents": [
+      "gen4_ind37.pkl",
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl"
+    ]
+  },
+  "gen5_ind82": {
+    "generation": 5,
+    "id": 82,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind83": {
+    "generation": 5,
+    "id": 83,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind84": {
+    "generation": 5,
+    "id": 84,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind85": {
+    "generation": 5,
+    "id": 85,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model6_x_model2.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind86": {
+    "generation": 5,
+    "id": 86,
+    "parents": [
+      "gen4_ind25.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind87": {
+    "generation": 5,
+    "id": 87,
+    "parents": [
+      "gen4_ind21.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind88": {
+    "generation": 5,
+    "id": 88,
+    "parents": [
+      "gen4_ind17.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind89": {
+    "generation": 5,
+    "id": 89,
+    "parents": [
+      "gen4_ind18.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen5_ind90": {
+    "generation": 5,
+    "id": 90,
+    "parents": [
+      "child_gen2_child_gen1_model2_x_model7_x_child_gen1_model2_x_model3.pkl",
+      "gen4_ind37.pkl"
+    ]
+  },
+  "gen6_ind1": {
+    "generation": 6,
+    "id": 1,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind2": {
+    "generation": 6,
+    "id": 2,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind3": {
+    "generation": 6,
+    "id": 3,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind4": {
+    "generation": 6,
+    "id": 4,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind5": {
+    "generation": 6,
+    "id": 5,
+    "parents": [
+      "gen5_ind74.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind6": {
+    "generation": 6,
+    "id": 6,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind7": {
+    "generation": 6,
+    "id": 7,
+    "parents": [
+      "gen5_ind63.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind8": {
+    "generation": 6,
+    "id": 8,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind9": {
+    "generation": 6,
+    "id": 9,
+    "parents": [
+      "gen5_ind22.pkl",
+      "gen5_ind86.pkl"
+    ]
+  },
+  "gen6_ind10": {
+    "generation": 6,
+    "id": 10,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind11": {
+    "generation": 6,
+    "id": 11,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind12": {
+    "generation": 6,
+    "id": 12,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind13": {
+    "generation": 6,
+    "id": 13,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind14": {
+    "generation": 6,
+    "id": 14,
+    "parents": [
+      "gen5_ind86.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind15": {
+    "generation": 6,
+    "id": 15,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind16": {
+    "generation": 6,
+    "id": 16,
+    "parents": [
+      "gen5_ind63.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind17": {
+    "generation": 6,
+    "id": 17,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind18": {
+    "generation": 6,
+    "id": 18,
+    "parents": [
+      "gen5_ind22.pkl",
+      "gen5_ind74.pkl"
+    ]
+  },
+  "gen6_ind19": {
+    "generation": 6,
+    "id": 19,
+    "parents": [
+      "gen5_ind41.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind20": {
+    "generation": 6,
+    "id": 20,
+    "parents": [
+      "gen4_ind29.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind21": {
+    "generation": 6,
+    "id": 21,
+    "parents": [
+      "gen4_ind27.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind22": {
+    "generation": 6,
+    "id": 22,
+    "parents": [
+      "gen5_ind10.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind23": {
+    "generation": 6,
+    "id": 23,
+    "parents": [
+      "gen5_ind86.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind24": {
+    "generation": 6,
+    "id": 24,
+    "parents": [
+      "gen5_ind74.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind25": {
+    "generation": 6,
+    "id": 25,
+    "parents": [
+      "gen5_ind63.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind26": {
+    "generation": 6,
+    "id": 26,
+    "parents": [
+      "gen5_ind75.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind27": {
+    "generation": 6,
+    "id": 27,
+    "parents": [
+      "gen5_ind22.pkl",
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl"
+    ]
+  },
+  "gen6_ind28": {
+    "generation": 6,
+    "id": 28,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind29": {
+    "generation": 6,
+    "id": 29,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind30": {
+    "generation": 6,
+    "id": 30,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind31": {
+    "generation": 6,
+    "id": 31,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind32": {
+    "generation": 6,
+    "id": 32,
+    "parents": [
+      "gen5_ind86.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind33": {
+    "generation": 6,
+    "id": 33,
+    "parents": [
+      "gen5_ind74.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind34": {
+    "generation": 6,
+    "id": 34,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind35": {
+    "generation": 6,
+    "id": 35,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind36": {
+    "generation": 6,
+    "id": 36,
+    "parents": [
+      "gen5_ind22.pkl",
+      "gen5_ind63.pkl"
+    ]
+  },
+  "gen6_ind37": {
+    "generation": 6,
+    "id": 37,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind38": {
+    "generation": 6,
+    "id": 38,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind39": {
+    "generation": 6,
+    "id": 39,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind40": {
+    "generation": 6,
+    "id": 40,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind41": {
+    "generation": 6,
+    "id": 41,
+    "parents": [
+      "gen5_ind86.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind42": {
+    "generation": 6,
+    "id": 42,
+    "parents": [
+      "gen5_ind74.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind43": {
+    "generation": 6,
+    "id": 43,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind44": {
+    "generation": 6,
+    "id": 44,
+    "parents": [
+      "gen5_ind63.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind45": {
+    "generation": 6,
+    "id": 45,
+    "parents": [
+      "gen5_ind22.pkl",
+      "gen5_ind75.pkl"
+    ]
+  },
+  "gen6_ind46": {
+    "generation": 6,
+    "id": 46,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind47": {
+    "generation": 6,
+    "id": 47,
+    "parents": [
+      "gen4_ind29.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind48": {
+    "generation": 6,
+    "id": 48,
+    "parents": [
+      "gen4_ind27.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind49": {
+    "generation": 6,
+    "id": 49,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind50": {
+    "generation": 6,
+    "id": 50,
+    "parents": [
+      "gen5_ind86.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind51": {
+    "generation": 6,
+    "id": 51,
+    "parents": [
+      "gen5_ind74.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind52": {
+    "generation": 6,
+    "id": 52,
+    "parents": [
+      "child_gen2_child_gen1_model6_x_model7_x_child_gen1_model11_x_model7.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind53": {
+    "generation": 6,
+    "id": 53,
+    "parents": [
+      "gen5_ind63.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen6_ind54": {
+    "generation": 6,
+    "id": 54,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind22.pkl"
+    ]
+  },
+  "gen7_ind1": {
+    "generation": 7,
+    "id": 1,
+    "parents": [
+      "gen6_ind14.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind2": {
+    "generation": 7,
+    "id": 2,
+    "parents": [
+      "gen6_ind42.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind3": {
+    "generation": 7,
+    "id": 3,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind4": {
+    "generation": 7,
+    "id": 4,
+    "parents": [
+      "gen6_ind39.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind5": {
+    "generation": 7,
+    "id": 5,
+    "parents": [
+      "gen6_ind46.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind6": {
+    "generation": 7,
+    "id": 6,
+    "parents": [
+      "gen6_ind54.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind7": {
+    "generation": 7,
+    "id": 7,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind8": {
+    "generation": 7,
+    "id": 8,
+    "parents": [
+      "gen6_ind43.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind9": {
+    "generation": 7,
+    "id": 9,
+    "parents": [
+      "gen6_ind35.pkl",
+      "gen5_ind10.pkl"
+    ]
+  },
+  "gen7_ind10": {
+    "generation": 7,
+    "id": 10,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind11": {
+    "generation": 7,
+    "id": 11,
+    "parents": [
+      "gen6_ind42.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind12": {
+    "generation": 7,
+    "id": 12,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind13": {
+    "generation": 7,
+    "id": 13,
+    "parents": [
+      "gen6_ind39.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind14": {
+    "generation": 7,
+    "id": 14,
+    "parents": [
+      "gen6_ind46.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind15": {
+    "generation": 7,
+    "id": 15,
+    "parents": [
+      "gen6_ind54.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind16": {
+    "generation": 7,
+    "id": 16,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind17": {
+    "generation": 7,
+    "id": 17,
+    "parents": [
+      "gen6_ind43.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind18": {
+    "generation": 7,
+    "id": 18,
+    "parents": [
+      "gen6_ind35.pkl",
+      "gen6_ind14.pkl"
+    ]
+  },
+  "gen7_ind19": {
+    "generation": 7,
+    "id": 19,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind20": {
+    "generation": 7,
+    "id": 20,
+    "parents": [
+      "gen6_ind14.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind21": {
+    "generation": 7,
+    "id": 21,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind22": {
+    "generation": 7,
+    "id": 22,
+    "parents": [
+      "gen6_ind39.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind23": {
+    "generation": 7,
+    "id": 23,
+    "parents": [
+      "gen6_ind46.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind24": {
+    "generation": 7,
+    "id": 24,
+    "parents": [
+      "gen6_ind54.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind25": {
+    "generation": 7,
+    "id": 25,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind26": {
+    "generation": 7,
+    "id": 26,
+    "parents": [
+      "gen6_ind43.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind27": {
+    "generation": 7,
+    "id": 27,
+    "parents": [
+      "gen6_ind35.pkl",
+      "gen6_ind42.pkl"
+    ]
+  },
+  "gen7_ind28": {
+    "generation": 7,
+    "id": 28,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind29": {
+    "generation": 7,
+    "id": 29,
+    "parents": [
+      "gen6_ind14.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind30": {
+    "generation": 7,
+    "id": 30,
+    "parents": [
+      "gen6_ind42.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind31": {
+    "generation": 7,
+    "id": 31,
+    "parents": [
+      "gen6_ind39.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind32": {
+    "generation": 7,
+    "id": 32,
+    "parents": [
+      "gen6_ind46.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind33": {
+    "generation": 7,
+    "id": 33,
+    "parents": [
+      "gen6_ind54.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind34": {
+    "generation": 7,
+    "id": 34,
+    "parents": [
+      "gen5_ind75.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind35": {
+    "generation": 7,
+    "id": 35,
+    "parents": [
+      "gen6_ind43.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind36": {
+    "generation": 7,
+    "id": 36,
+    "parents": [
+      "gen6_ind35.pkl",
+      "gen5_ind41.pkl"
+    ]
+  },
+  "gen7_ind37": {
+    "generation": 7,
+    "id": 37,
+    "parents": [
+      "gen5_ind10.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen7_ind38": {
+    "generation": 7,
+    "id": 38,
+    "parents": [
+      "gen6_ind14.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen7_ind39": {
+    "generation": 7,
+    "id": 39,
+    "parents": [
+      "gen6_ind42.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen7_ind40": {
+    "generation": 7,
+    "id": 40,
+    "parents": [
+      "gen5_ind41.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen7_ind41": {
+    "generation": 7,
+    "id": 41,
+    "parents": [
+      "gen6_ind46.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen7_ind42": {
+    "generation": 7,
+    "id": 42,
+    "parents": [
+      "gen6_ind54.pkl",
+      "gen6_ind39.pkl"
+    ]
+  },
+  "gen1_ind1": {
+    "generation": 1,
+    "id": 1,
+    "parents": [
+      "model3.zip",
+      "model2.zip"
+    ]
+  },
+  "gen1_ind2": {
+    "generation": 1,
+    "id": 2,
+    "parents": [
+      "model4.zip",
+      "model2.zip"
+    ]
+  },
+  "gen1_ind3": {
+    "generation": 1,
+    "id": 3,
+    "parents": [
+      "model13.zip",
+      "model2.zip"
+    ]
+  },
+  "gen1_ind4": {
+    "generation": 1,
+    "id": 4,
+    "parents": [
+      "model5.zip",
+      "model2.zip"
+    ]
+  },
+  "gen1_ind5": {
+    "generation": 1,
+    "id": 5,
+    "parents": [
+      "model2.zip",
+      "model3.zip"
+    ]
+  },
+  "gen1_ind6": {
+    "generation": 1,
+    "id": 6,
+    "parents": [
+      "model4.zip",
+      "model3.zip"
+    ]
+  },
+  "gen1_ind7": {
+    "generation": 1,
+    "id": 7,
+    "parents": [
+      "model13.zip",
+      "model3.zip"
+    ]
+  },
+  "gen1_ind8": {
+    "generation": 1,
+    "id": 8,
+    "parents": [
+      "model5.zip",
+      "model3.zip"
+    ]
+  },
+  "gen1_ind9": {
+    "generation": 1,
+    "id": 9,
+    "parents": [
+      "model2.zip",
+      "model4.zip"
+    ]
+  },
+  "gen1_ind10": {
+    "generation": 1,
+    "id": 10,
+    "parents": [
+      "model3.zip",
+      "model4.zip"
+    ]
+  },
+  "gen1_ind11": {
+    "generation": 1,
+    "id": 11,
+    "parents": [
+      "model13.zip",
+      "model4.zip"
+    ]
+  },
+  "gen1_ind12": {
+    "generation": 1,
+    "id": 12,
+    "parents": [
+      "model5.zip",
+      "model4.zip"
+    ]
+  },
+  "gen1_ind13": {
+    "generation": 1,
+    "id": 13,
+    "parents": [
+      "model2.zip",
+      "model13.zip"
+    ]
+  },
+  "gen1_ind14": {
+    "generation": 1,
+    "id": 14,
+    "parents": [
+      "model3.zip",
+      "model13.zip"
+    ]
+  },
+  "gen1_ind15": {
+    "generation": 1,
+    "id": 15,
+    "parents": [
+      "model4.zip",
+      "model13.zip"
+    ]
+  },
+  "gen1_ind16": {
+    "generation": 1,
+    "id": 16,
+    "parents": [
+      "model5.zip",
+      "model13.zip"
+    ]
+  },
+  "gen1_ind17": {
+    "generation": 1,
+    "id": 17,
+    "parents": [
+      "model2.zip",
+      "model5.zip"
+    ]
+  },
+  "gen1_ind18": {
+    "generation": 1,
+    "id": 18,
+    "parents": [
+      "model3.zip",
+      "model5.zip"
+    ]
+  },
+  "gen1_ind19": {
+    "generation": 1,
+    "id": 19,
+    "parents": [
+      "model4.zip",
+      "model5.zip"
+    ]
+  },
+  "gen1_ind20": {
+    "generation": 1,
+    "id": 20,
+    "parents": [
+      "model13.zip",
+      "model5.zip"
+    ]
+  }
+}
