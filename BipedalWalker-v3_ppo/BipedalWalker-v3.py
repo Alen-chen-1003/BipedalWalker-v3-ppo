@@ -2885,12 +2885,11 @@ def _iterative_refine_single_layer(
     """
     漸進式 Iterative OT 的「重算」步驟：只重新對齊第 stage_idx 層。
 
-    第一層(stage_idx==0)：輸入端(觀測值)沒有排列可對齊，但輸出端(dad/mom 自己的 oh
-    個神經元)彼此的功能對應仍然模糊，值得疊代重算。比對基礎統一在同一組觀測維度上——
-    X_md_prev(dad 側交叉通道)讀的是 mom designated 的觀測維度，就拿它去跟同樣讀那組
-    維度的 Wm_pure(mom 自己的純通道)比對；X_dm_prev 同理跟 Wd_pure 比。跟 round 1 的
-    T_self 不同：round 1 是拿 Wd_pure(讀 dad designated 維度)去跟 Wm_pure(讀 mom
-    designated 維度)比，兩邊看的根本不是同一組觀測特徵，這裡改成同一組維度互相比較。
+    第一層(stage_idx==0)：X_md 的列（輸出端）屬於 dad 的輸出神經元空間，與 Wd_pure
+    的列空間相同，因此 OT 拿 X_md_prev 對 Wd_pure 比才是同空間比較，translated 也用
+    Wd_pure 填入 X_md。X_dm 同理：列空間屬於 mom，對 Wm_pure 比並以 Wm_pure 填入。
+    深層(stage_idx>=1)：對齊欄（輸入端），方向已正確（X_md 用 Wd_pure 欄對齊，
+    X_dm 用 Wm_pure 欄對齊）。
 
     深層(stage_idx>=1)：跟 recursive_ot_fuse_single_layer 一致，T 只能拿來把
     Wd_pure/Wm_pure（dad/mom 純通道）翻譯成正確的欄位順序，不能直接置換
@@ -2927,14 +2926,13 @@ def _iterative_refine_single_layer(
     X_dm_prev = W[oh:, :ih].clone()  # (oh, ih)，剛被 PPO 訓練過的 mom 側交叉通道
 
     if stage_idx == 0:
-        # 第一層：重新配對「dad 的哪個神經元，功能上像 mom 的哪個神經元」，
-        # 兩邊都拿讀同一組觀測維度的權重來比（X_md_prev 跟 Wm_pure 都讀 mom
-        # designated 的維度；X_dm_prev 跟 Wd_pure 都讀 dad designated 的維度）。
-        T_self_md = _compute_layer_transport(X_md_prev, Wm_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝mom自己神經元
-        T_self_dm = _compute_layer_transport(X_dm_prev, Wd_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝dad自己神經元
+        # 第一層：X_md 的列（輸出端）屬於 dad 的輸出神經元空間，Wd_pure 的列也在同一空間，
+        # 因此用 Wd_pure 作 OT 參考才是同空間比較；X_dm 同理對齊 Wm_pure。
+        T_self_md = _compute_layer_transport(X_md_prev, Wd_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝dad自己神經元
+        T_self_dm = _compute_layer_transport(X_dm_prev, Wm_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝mom自己神經元
 
-        translated_dad = (T_self_md.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 dad 神經元順序
-        translated_mom = (T_self_dm.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 mom 神經元順序
+        translated_dad = (T_self_md.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 dad 神經元順序 → 寫入 X_md
+        translated_mom = (T_self_dm.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 mom 神經元順序 → 寫入 X_dm
     else:
         # T 的引數順序跟 recursive_ot_fuse_single_layer 一致（Wd_pure/Wm_pure 當第一個引數），
         # 這樣算出來的 T 才能直接右乘到 Wd_pure/Wm_pure 上，翻譯出欄位順序正確
