@@ -3345,6 +3345,20 @@ def progressive_recursive_ot_evolve(
         print("[Progressive OT] 全部層融合完成。")
 
 
+def _pre_finetune_out_path(args) -> Optional[str]:
+    """
+    推導「PPO 微調前」那份初始化模型要存去哪。
+    明確給了 --progressive_pre_finetune_out 就用它（空字串＝停用）；
+    沒給的話，從最終輸出路徑衍生：xxx.pkl → xxx_preppo.pkl。
+    """
+    explicit = getattr(args, "progressive_pre_finetune_out", None)
+    if explicit is not None:
+        return explicit or None
+    final_path = getattr(args, "ties_out", None) or f"./models/ties_test_child_{args.crossover}.pkl"
+    base, ext = os.path.splitext(final_path)
+    return f"{base}_preppo{ext or '.pkl'}"
+
+
 def progressive_iterative_ot_evolve(
     child_agent: "PPO",
     dad_policy: nn.Module,
@@ -3360,9 +3374,15 @@ def progressive_iterative_ot_evolve(
     device: str = "cuda",
     alpha_init: float = 1.0,
     alpha_gamma: float = 0.7169,
+    pre_finetune_save_path: Optional[str] = None,
 ):
     """
     漸進式 Iterative OT 融合：外層逐層(layer)，內層逐輪(round)。
+
+    pre_finetune_save_path：給了路徑的話，在最終 PPO 微調「開始之前」先把 policy 存一份，
+    留下純 OT+蒸餾初始化的結果，方便跟微調後的版本對照（分離「初始化品質」與「PPO 修復
+    能力」兩個因素）。final_finetune_steps=0 時不會重複存，因為那時最終權重本來就等同
+    微調前的權重，直接由呼叫端的存檔負責。
 
     alpha_init / alpha_gamma：每個 stage 的 round 迴圈裡，第 round_idx 輪（0-based，
     每換一層歸零重新從 alpha_init 開始)用的 OT 介入強度是
@@ -3436,6 +3456,12 @@ def progressive_iterative_ot_evolve(
     else:
         print("[Progressive Iterative OT] 全部層融合完成。")
 
+    if pre_finetune_save_path and final_finetune_steps > 0:
+        os.makedirs(os.path.dirname(pre_finetune_save_path) or ".", exist_ok=True)
+        with open(pre_finetune_save_path, "wb") as f:
+            cloudpickle.dump(policy, f)
+        print(f"[Progressive Iterative OT] 已儲存「PPO 微調前」的純 OT+蒸餾初始化模型：{pre_finetune_save_path}")
+
     if final_finetune_steps > 0:
         _rebuild_policy_optimizer(policy)
         auto_difficulty_callback = None
@@ -3465,6 +3491,7 @@ def progressive_iterative_ot_evolve_focused(
     device: str = "cuda",
     alpha_init: float = 1.0,
     alpha_gamma: float = 0.7169,
+    pre_finetune_save_path: Optional[str] = None,
 ):
     """
     跟 progressive_iterative_ot_evolve 的唯一差異，在於每輪蒸餾消化的「範圍」：
@@ -3527,6 +3554,12 @@ def progressive_iterative_ot_evolve_focused(
               f"剩下 {len(remaining)} 層維持蒸餾基底值，不做 OT：{remaining}")
     else:
         print("[Progressive Iterative OT - Focused] 全部層融合完成。")
+
+    if pre_finetune_save_path and final_finetune_steps > 0:
+        os.makedirs(os.path.dirname(pre_finetune_save_path) or ".", exist_ok=True)
+        with open(pre_finetune_save_path, "wb") as f:
+            cloudpickle.dump(policy, f)
+        print(f"[Progressive Iterative OT - Focused] 已儲存「PPO 微調前」的純 OT+蒸餾初始化模型：{pre_finetune_save_path}")
 
     if final_finetune_steps > 0:
         _rebuild_policy_optimizer(policy)
@@ -4727,6 +4760,8 @@ if __name__ == "__main__":
                          help="ot_progressive_iter 每一層內層迴圈跑幾輪 OT→訓練（預設 10）")
     parser.add_argument("--progressive_steps_per_round", type=int, default=1_000_000,
                          help="ot_progressive_iter 全部層蒸餾消化完之後，最終真實環境微調的步數（預設 100 萬步）")
+    parser.add_argument("--progressive_pre_finetune_out", type=str, default=None,
+                         help="ot_progressive_iter(_focused) 在最終 PPO 微調『開始之前』額外存一份純 OT+蒸餾初始化模型的路徑；不給則自動用 <ties_out 去掉副檔名>_preppo.pkl。設成空字串可停用")
     parser.add_argument("--progressive_ot_alpha_init", type=float, default=1.0,
                          help="ot_progressive_iter(_focused) 每個 stage 第一輪(round_idx=0)的 OT 介入強度 alpha（預設 1.0＝第一輪完整套用 OT，大力對齊）")
     parser.add_argument("--progressive_ot_gamma", type=float, default=0.7169,
@@ -5630,6 +5665,7 @@ if __name__ == "__main__":
                 device=str(child_model.device),
                 alpha_init=args.progressive_ot_alpha_init,
                 alpha_gamma=args.progressive_ot_gamma,
+                pre_finetune_save_path=_pre_finetune_out_path(args),
             )
         elif args.crossover == "ot_progressive_iter_focused":
             print(f"\n===== 漸進式逐層+逐輪迭代 OT（聚焦蒸餾版，每層 {args.progressive_n_rounds} 輪，"
@@ -5643,6 +5679,7 @@ if __name__ == "__main__":
                 device=str(child_model.device),
                 alpha_init=args.progressive_ot_alpha_init,
                 alpha_gamma=args.progressive_ot_gamma,
+                pre_finetune_save_path=_pre_finetune_out_path(args),
             )
         elif args.crossover == "ties_progressive":
             print(f"\n===== 漸進式逐層 TIES（k={args.ties_k}，每 stage 退火 {args.progressive_steps_per_stage} 步）=====")
