@@ -2885,11 +2885,23 @@ def _iterative_refine_single_layer(
     """
     漸進式 Iterative OT 的「重算」步驟：只重新對齊第 stage_idx 層。
 
-    第一層(stage_idx==0)：X_md 的列（輸出端）屬於 dad 的輸出神經元空間，與 Wd_pure
-    的列空間相同，因此 OT 拿 X_md_prev 對 Wd_pure 比才是同空間比較，translated 也用
-    Wd_pure 填入 X_md。X_dm 同理：列空間屬於 mom，對 Wm_pure 比並以 Wm_pure 填入。
-    深層(stage_idx>=1)：對齊欄（輸入端），方向已正確（X_md 用 Wd_pure 欄對齊，
-    X_dm 用 Wm_pure 欄對齊）。
+    第一層(stage_idx==0)：輸入端(觀測值)沒有排列可對齊，但輸出端(dad/mom 自己的 oh
+    個神經元)彼此的功能對應仍然模糊，值得疊代重算。比對基礎統一在同一組觀測維度上——
+    X_md_prev(dad 側交叉通道)讀的是 mom designated 的觀測維度，就拿它去跟同樣讀那組
+    維度的 Wm_pure(mom 自己的純通道)比對；X_dm_prev 同理跟 Wd_pure 比。跟 round 1 的
+    T_self 不同：round 1 是拿 Wd_pure(讀 dad designated 維度)去跟 Wm_pure(讀 mom
+    designated 維度)比，兩邊看的根本不是同一組觀測特徵，這裡改成同一組維度互相比較。
+
+    ⚠️ 不要把第一層的來源矩陣改成「X_md 用 Wd_pure、X_dm 用 Wm_pure」（曾經改過，
+    commit b4dd545，已還原）。理由：第一層的輸入是**共享的 24 維 observation**，不是
+    上一層 hidden 的拼接，所以欄的左右半邊只是 obs[0:12](本體感覺) 跟 obs[12:24]
+    (knee2/觸地 + 10 條 LIDAR)兩組不同的觀測特徵，而不是「dad 的輸入空間」跟「mom 的
+    輸入空間」。X_md 是乘在 obs[12:24] 上的，來源就必須同樣是讀 obs[12:24] 的權重
+    (Wm_pure)；換成 Wd_pure 等於把本體感覺調出來的權重拿去乘 LIDAR，第一層的地形感知
+    直接壞掉——實測 child 的 LIDAR 權重範數暴增到父母的 2.2 倍，且表現隨地形難度單調
+    崩潰(難度 0.0 尚有 301，難度 1.0 掉到 -5)。至於「X_md 的列要屬於 dad 神經元空間」
+    這件事，是由 T 的列重排負責的(T @ Wm_pure 會把 mom 的列重排成 dad 的順序)，不需要
+    也不能靠換來源矩陣達成。
 
     深層(stage_idx>=1)：跟 recursive_ot_fuse_single_layer 一致，T 只能拿來把
     Wd_pure/Wm_pure（dad/mom 純通道）翻譯成正確的欄位順序，不能直接置換
@@ -2926,13 +2938,14 @@ def _iterative_refine_single_layer(
     X_dm_prev = W[oh:, :ih].clone()  # (oh, ih)，剛被 PPO 訓練過的 mom 側交叉通道
 
     if stage_idx == 0:
-        # 第一層：X_md 的列（輸出端）屬於 dad 的輸出神經元空間，Wd_pure 的列也在同一空間，
-        # 因此用 Wd_pure 作 OT 參考才是同空間比較；X_dm 同理對齊 Wm_pure。
-        T_self_md = _compute_layer_transport(X_md_prev, Wd_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝dad自己神經元
-        T_self_dm = _compute_layer_transport(X_dm_prev, Wm_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝mom自己神經元
+        # 第一層：重新配對「dad 的哪個神經元，功能上像 mom 的哪個神經元」，
+        # 兩邊都拿讀同一組觀測維度的權重來比（X_md_prev 跟 Wm_pure 都讀 mom
+        # designated 的維度；X_dm_prev 跟 Wd_pure 都讀 dad designated 的維度）。
+        T_self_md = _compute_layer_transport(X_md_prev, Wm_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝mom自己神經元
+        T_self_dm = _compute_layer_transport(X_dm_prev, Wd_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝dad自己神經元
 
-        translated_dad = (T_self_md.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 dad 神經元順序 → 寫入 X_md
-        translated_mom = (T_self_dm.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 mom 神經元順序 → 寫入 X_dm
+        translated_dad = (T_self_md.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 dad 神經元順序
+        translated_mom = (T_self_dm.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 mom 神經元順序
     else:
         # T 的引數順序跟 recursive_ot_fuse_single_layer 一致（Wd_pure/Wm_pure 當第一個引數），
         # 這樣算出來的 T 才能直接右乘到 Wd_pure/Wm_pure 上，翻譯出欄位順序正確
@@ -3338,7 +3351,7 @@ def progressive_iterative_ot_evolve(
     mom_policy: nn.Module,
     distill_pt: str,
     env=None,
-    n_rounds: int = 5,
+    n_rounds: int = 10,
     distill_epochs: int = 5,
     distill_lr: float = 0.008,
     final_finetune_steps: int = 1_000_000,
@@ -3346,7 +3359,7 @@ def progressive_iterative_ot_evolve(
     ot_frac: float = 1.0,
     device: str = "cuda",
     alpha_init: float = 1.0,
-    alpha_gamma: float = 0.473,
+    alpha_gamma: float = 0.7169,
 ):
     """
     漸進式 Iterative OT 融合：外層逐層(layer)，內層逐輪(round)。
@@ -3356,11 +3369,11 @@ def progressive_iterative_ot_evolve(
     alpha_t = alpha_init * (alpha_gamma ** round_idx)，隨 round 指數衰減。alpha_t=1
     等同完整套用 OT 翻譯值，alpha_t=0 那一輪的 OT 步驟完全不改動權重，退化成跟
     distill_only（不做 OT，只用蒸餾）一樣的效果——只剩該輪的 distill_crosstalk_baseline
-    在調整權重。預設 alpha_init=1.0（第一輪大力對齊，完整套用 OT）、alpha_gamma=0.473
-    （搭配預設 n_rounds=5，五輪的 alpha_t ≈ 1.0, 0.473, 0.224, 0.106, 0.050——最後一輪
-    幾乎完全停止干預，交由訓練自己收斂）。若調整 n_rounds，需重新用
-    gamma=(alpha_target/alpha_init)**(1/(n_rounds-1)) 反推 gamma，否則衰減速度會跟
-    輪數對不上。
+    在調整權重。預設 alpha_init=1.0（第一輪大力對齊，完整套用 OT）、alpha_gamma=0.7169
+    （搭配預設 n_rounds=10，十輪的 alpha_t ≈ 1.0, 0.717, 0.514, 0.368, 0.264, 0.189,
+    0.136, 0.097, 0.070, 0.050——最後一輪幾乎完全停止干預，交由訓練自己收斂）。若調整
+    n_rounds，需重新用 gamma=(alpha_target/alpha_init)**(1/(n_rounds-1)) 反推 gamma，
+    否則衰減速度會跟輪數對不上。
 
     每個 stage（第 L 層）：
       round 1：用 dad/mom 固定純通道權重算 T，寫入交叉通道（recursive_ot_fuse_single_layer，
@@ -3443,7 +3456,7 @@ def progressive_iterative_ot_evolve_focused(
     mom_policy: nn.Module,
     distill_pt: str,
     env=None,
-    n_rounds: int = 5,
+    n_rounds: int = 10,
     distill_epochs: int = 5,
     distill_lr: float = 0.008,
     final_finetune_steps: int = 1_000_000,
@@ -3451,7 +3464,7 @@ def progressive_iterative_ot_evolve_focused(
     ot_frac: float = 1.0,
     device: str = "cuda",
     alpha_init: float = 1.0,
-    alpha_gamma: float = 0.473,
+    alpha_gamma: float = 0.7169,
 ):
     """
     跟 progressive_iterative_ot_evolve 的唯一差異，在於每輪蒸餾消化的「範圍」：
@@ -4710,14 +4723,14 @@ if __name__ == "__main__":
                          help="ot_progressive 只跑前幾層就停（預設 None＝全部層都跑），用來測試只換單一層的效果")
     parser.add_argument("--progressive_no_anneal", action="store_true",
                          help="ot_progressive 不做漸進退火，每個 stage 一開始就直接是完整 OT 值，用來對照有無退火的差異")
-    parser.add_argument("--progressive_n_rounds", type=int, default=5,
-                         help="ot_progressive_iter 每一層內層迴圈跑幾輪 OT→訓練（預設 5）")
+    parser.add_argument("--progressive_n_rounds", type=int, default=10,
+                         help="ot_progressive_iter 每一層內層迴圈跑幾輪 OT→訓練（預設 10）")
     parser.add_argument("--progressive_steps_per_round", type=int, default=1_000_000,
                          help="ot_progressive_iter 全部層蒸餾消化完之後，最終真實環境微調的步數（預設 100 萬步）")
     parser.add_argument("--progressive_ot_alpha_init", type=float, default=1.0,
                          help="ot_progressive_iter(_focused) 每個 stage 第一輪(round_idx=0)的 OT 介入強度 alpha（預設 1.0＝第一輪完整套用 OT，大力對齊）")
-    parser.add_argument("--progressive_ot_gamma", type=float, default=0.473,
-                         help="ot_progressive_iter(_focused) alpha 隨 round 的指數衰減率：alpha_t = alpha_init * gamma**round_idx（預設 0.473，搭配 progressive_n_rounds=5 時最後一輪 alpha≈0.05，幾乎退化到跟 distill_only 一樣；若改動 n_rounds 需重新用 gamma=(alpha_target/alpha_init)**(1/(n_rounds-1)) 反推）")
+    parser.add_argument("--progressive_ot_gamma", type=float, default=0.7169,
+                         help="ot_progressive_iter(_focused) alpha 隨 round 的指數衰減率：alpha_t = alpha_init * gamma**round_idx（預設 0.7169，搭配 progressive_n_rounds=10 時最後一輪 alpha≈0.05，幾乎退化到跟 distill_only 一樣；若改動 n_rounds 需重新用 gamma=(alpha_target/alpha_init)**(1/(n_rounds-1)) 反推）")
     parser.add_argument("--ot_frac", type=float, default=1.0,
                          help="OT 只覆寫交叉通道前多少比例的列（輸出神經元），其餘維持蒸餾基底/靜音；1.0=整塊覆寫（原本行為），適用 ot_progressive / ot_first_distill_rest")
     parser.add_argument("--crossover", type=str, default="zero", choices=["zero", "ties", "ties_progressive", "ot", "ot_recursive", "ot_progressive", "ot_progressive_iter", "ot_progressive_iter_focused", "ot_reconstruct", "ot_iter", "ot_mutual", "ot_first_distill_rest", "distill_only"],
