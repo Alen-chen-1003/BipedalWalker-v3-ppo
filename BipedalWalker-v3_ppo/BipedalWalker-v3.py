@@ -2885,30 +2885,30 @@ def _iterative_refine_single_layer(
     """
     漸進式 Iterative OT 的「重算」步驟：只重新對齊第 stage_idx 層。
 
-    第一層(stage_idx==0)：輸入端(觀測值)沒有排列可對齊，但輸出端(dad/mom 自己的 oh
-    個神經元)彼此的功能對應仍然模糊，值得疊代重算。比對基礎統一在同一組觀測維度上——
-    X_md_prev(dad 側交叉通道)讀的是 mom designated 的觀測維度，就拿它去跟同樣讀那組
-    維度的 Wm_pure(mom 自己的純通道)比對；X_dm_prev 同理跟 Wd_pure 比。跟 round 1 的
-    T_self 不同：round 1 是拿 Wd_pure(讀 dad designated 維度)去跟 Wm_pure(讀 mom
-    designated 維度)比，兩邊看的根本不是同一組觀測特徵，這裡改成同一組維度互相比較。
+    2026-09-07 實驗：不分 stage，全部層統一用「列對列」公式（原本只有 stage_idx==0
+    這樣做，深層是用轉置去對齊欄，見 git 歷史）。理由：Wm_pure 的欄，不管在哪一層，
+    天生就對得上 child 另一半當下實際收到的輸入——因為 child 建構(create_dual_channel_
+    policy)是逐層整段複製 mom 的權重列，mom 那半邊網路在每一層都是自我一致、原封不動
+    複製過去的，所以 Wm_pure 的欄位語意永遠等於「mom 那半邊上一層真正的輸出」，不需要
+    再靠 T 做欄位翻譯。X_md_prev(dad 側交叉通道)的列＝dad 自己 oh 個神經元(身分已知、
+    從未打亂)，比對基礎統一在 Wm_pure 也讀得到的同一組輸入上——第一層是共享的 obs
+    維度，深層是複製過去的 mom 隱藏向量，兩種情況欄位語意都一致，所以同一條公式可以
+    直接套用不必分支。X_dm_prev 同理對齊 Wd_pure。
 
-    ⚠️ 不要把第一層的來源矩陣改成「X_md 用 Wd_pure、X_dm 用 Wm_pure」（曾經改過，
-    commit b4dd545，已還原）。理由：第一層的輸入是**共享的 24 維 observation**，不是
-    上一層 hidden 的拼接，所以欄的左右半邊只是 obs[0:12](本體感覺) 跟 obs[12:24]
-    (knee2/觸地 + 10 條 LIDAR)兩組不同的觀測特徵，而不是「dad 的輸入空間」跟「mom 的
-    輸入空間」。X_md 是乘在 obs[12:24] 上的，來源就必須同樣是讀 obs[12:24] 的權重
+    這跟舊版深層公式（保留 dad 自己的權重「樣式」，用轉置去猜哪個欄位對應到哪個 mom
+    神經元）是兩種不同但都說得通的策略，哪個更好是實證問題，不是本次改動要下的結論。
+
+    ⚠️ 這條公式不能把來源矩陣換成「X_md 用 Wd_pure、X_dm 用 Wm_pure」（曾經改過，
+    commit b4dd545，已還原）。理由：第一層的輸入是**共享的 24 維 observation**，欄的
+    左右半邊是 obs[0:12](本體感覺) 跟 obs[12:24](knee2/觸地 + 10 條 LIDAR)兩組不同的
+    觀測特徵。X_md 是乘在 obs[12:24] 上的，來源就必須同樣是讀 obs[12:24] 的權重
     (Wm_pure)；換成 Wd_pure 等於把本體感覺調出來的權重拿去乘 LIDAR，第一層的地形感知
     直接壞掉——實測 child 的 LIDAR 權重範數暴增到父母的 2.2 倍，且表現隨地形難度單調
     崩潰(難度 0.0 尚有 301，難度 1.0 掉到 -5)。至於「X_md 的列要屬於 dad 神經元空間」
     這件事，是由 T 的列重排負責的(T @ Wm_pure 會把 mom 的列重排成 dad 的順序)，不需要
     也不能靠換來源矩陣達成。
 
-    深層(stage_idx>=1)：跟 recursive_ot_fuse_single_layer 一致，T 只能拿來把
-    Wd_pure/Wm_pure（dad/mom 純通道）翻譯成正確的欄位順序，不能直接置換
-    X_md_prev/X_dm_prev 自己的欄位——那些欄位的順序是被下一層 forward 實際讀到的
-    訊號（mom/dad 自己的隱藏向量）鎖死的，直接置換等於把權重跟它實際的輸入斷開。
-
-    兩種情況最後都跟目前訓練值取加權平均（alpha 是 OT 目標值的權重，1-alpha 是保留
+    最後跟目前訓練值取加權平均（alpha 是 OT 目標值的權重，1-alpha 是保留
     目前訓練值的權重），而不是直接覆寫掉訓練成果。alpha=1 等同完整套用 OT 目標值，
     alpha=0 這一步等於完全不做任何事（W 維持呼叫前的值不變），退化成跟
     distill_only（完全不做 OT，只用蒸餾）一樣的效果——外層呼叫端可以讓 alpha
@@ -2937,25 +2937,14 @@ def _iterative_refine_single_layer(
     X_md_prev = W[:oh, ih:].clone()  # (oh, ih)，剛被 PPO 訓練過的 dad 側交叉通道
     X_dm_prev = W[oh:, :ih].clone()  # (oh, ih)，剛被 PPO 訓練過的 mom 側交叉通道
 
-    if stage_idx == 0:
-        # 第一層：重新配對「dad 的哪個神經元，功能上像 mom 的哪個神經元」，
-        # 兩邊都拿讀同一組觀測維度的權重來比（X_md_prev 跟 Wm_pure 都讀 mom
-        # designated 的維度；X_dm_prev 跟 Wd_pure 都讀 dad designated 的維度）。
-        T_self_md = _compute_layer_transport(X_md_prev, Wm_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝mom自己神經元
-        T_self_dm = _compute_layer_transport(X_dm_prev, Wd_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝dad自己神經元
+    # 不分 stage，統一用「列對列」：重新配對「dad 的哪個神經元，功能上像 mom 的哪個
+    # 神經元」，兩邊都拿讀同一組輸入的權重來比（X_md_prev 跟 Wm_pure 都讀得到 mom
+    # 那半邊當下實際的輸入；X_dm_prev 跟 Wd_pure 同理讀 dad 那半邊的輸入）。
+    T_self_md = _compute_layer_transport(X_md_prev, Wm_pure)  # (oh, oh)：列＝dad神經元(依訓練)，欄＝mom自己神經元
+    T_self_dm = _compute_layer_transport(X_dm_prev, Wd_pure)  # (oh, oh)：列＝mom神經元(依訓練)，欄＝dad自己神經元
 
-        translated_dad = (T_self_md.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 dad 神經元順序
-        translated_mom = (T_self_dm.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 mom 神經元順序
-    else:
-        # T 的引數順序跟 recursive_ot_fuse_single_layer 一致（Wd_pure/Wm_pure 當第一個引數），
-        # 這樣算出來的 T 才能直接右乘到 Wd_pure/Wm_pure 上，翻譯出欄位順序正確
-        # （mom/dad 自己神經元順序）的值；比對目標換成訓練過的 X_md_prev/X_dm_prev，
-        # 讓配對結果依訓練而改變。
-        T_md = _compute_layer_transport(Wd_pure.t().contiguous(), X_md_prev.t().contiguous())  # (ih, ih)：列＝dad自己神經元，欄＝依訓練配對到的 mom 神經元
-        T_dm = _compute_layer_transport(Wm_pure.t().contiguous(), X_dm_prev.t().contiguous())  # (ih, ih)：列＝mom自己神經元，欄＝依訓練配對到的 dad 神經元
-
-        translated_dad = (Wd_pure.float() @ T_md.to(dev))  # (oh, ih)，欄位對應到 mom 自己的神經元順序
-        translated_mom = (Wm_pure.float() @ T_dm.to(dev))  # (oh, ih)，欄位對應到 dad 自己的神經元順序
+    translated_dad = (T_self_md.to(dev) @ Wm_pure.float())  # (oh, ih)，把 mom 自己的權重列翻譯成 dad 神經元順序
+    translated_mom = (T_self_dm.to(dev) @ Wd_pure.float())  # (oh, ih)，把 dad 自己的權重列翻譯成 mom 神經元順序
 
     # 跟目前訓練值取加權平均，而不是直接覆寫——alpha 控制 OT 目標值介入的強度，
     # alpha=0 時 X_*_new 完全等於 X_*_prev（這一步等於沒做事，retains 訓練值）
