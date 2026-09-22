@@ -1,4 +1,5 @@
-import env.custom_env 
+# -*- coding: utf-8 -*-
+import env.custom_env
 import hashlib
 import shutil
 import traceback  # 匯入 traceback 模組以便印出詳細錯誤
@@ -1980,11 +1981,19 @@ def ties_fuse_single_layer(
     mom_policy: nn.Module,
     stage_idx: int,
     k: float = 0.2,
+    alpha: Optional[float] = None,
 ) -> Optional[str]:
     """
     漸進式 TIES：只融合第 stage_idx 層（0-based）的交叉通道，其他層不動。
     TIES 各層獨立計算（不像 recursive OT 需要 T 逐層傳遞），所以可以任意層先做。
     回傳被融合的層名；stage_idx 超出層數回傳 None。
+
+    alpha：預設 None，維持原本行為（TIES 合併值直接覆寫）。設成 0~1 之間的數字時，
+    改成跟「child 呼叫前既有的交叉通道值」取加權平均：alpha*TIES合併值 +
+    (1-alpha)*child既有值。alpha=1 等同完整套用 TIES，alpha=0 這一步完全不改動 W
+    （退化成跟 distill_only 一樣，只剩後續蒸餾在動權重）——用來讓
+    progressive_iterative_ties_evolve 把 alpha 隨 round 衰減，讓 TIES 的介入強度
+    慢慢退場，跟 recursive_ot_fuse_single_layer 的 alpha 退火是同一種用法。
     """
     layer_names = _fusable_layer_names(child_policy)
     if stage_idx >= len(layer_names):
@@ -1994,14 +2003,23 @@ def ties_fuse_single_layer(
     dad_modules   = dict(dad_policy.named_modules())
     mom_modules   = dict(mom_policy.named_modules())
     child_modules = dict(child_policy.named_modules())
+    child_dev = next(child_policy.parameters()).device  # dad/mom_policy 可能跟 child 不在同一裝置
 
-    Wd = dad_modules[name].weight.data
-    Wm = mom_modules[name].weight.data
+    Wd = dad_modules[name].weight.data.to(child_dev)
+    Wm = mom_modules[name].weight.data.to(child_dev)
     W  = child_modules[name].weight.data
     oh, ih = Wd.shape[0] // 2, Wd.shape[1] // 2
 
-    W[:oh, ih:] = _ties_block(Wd[:oh, ih:], Wm[:oh, ih:], k)
-    W[oh:, :ih] = _ties_block(Wd[oh:, :ih], Wm[oh:, :ih], k)
+    merged_dad = _ties_block(Wd[:oh, ih:], Wm[:oh, ih:], k)
+    merged_mom = _ties_block(Wd[oh:, :ih], Wm[oh:, :ih], k)
+    if alpha is None:
+        W[:oh, ih:] = merged_dad
+        W[oh:, :ih] = merged_mom
+    else:
+        prev_dad = W[:oh, ih:].clone().float()
+        prev_mom = W[oh:, :ih].clone().float()
+        W[:oh, ih:] = (alpha * merged_dad.float() + (1 - alpha) * prev_dad).to(W.dtype)
+        W[oh:, :ih] = (alpha * merged_mom.float() + (1 - alpha) * prev_mom).to(W.dtype)
     return name
 
 
@@ -2042,6 +2060,96 @@ def progressive_ties_evolve(
             detach_crosstalk_annealing_hooks(policy, [fused_name])
 
     print("[Progressive TIES] 全部層融合完成。")
+
+
+def progressive_iterative_ties_evolve(
+    child_agent: "PPO",
+    dad_policy: nn.Module,
+    mom_policy: nn.Module,
+    distill_pt: str,
+    env=None,
+    n_rounds: int = 10,
+    distill_epochs: int = 5,
+    distill_lr: float = 0.008,
+    final_finetune_steps: int = 1_000_000,
+    max_stages: Optional[int] = None,
+    k: float = 0.2,
+    device: str = "cuda",
+    alpha_init: float = 1.0,
+    alpha_gamma: float = 0.7169,
+    pre_finetune_save_path: Optional[str] = None,
+):
+    """
+    跟 progressive_iterative_ot_evolve（見該函式 docstring）完全相同的外層逐層(stage)、
+    內層逐輪(round)流程——每輪對齊→蒸餾消化，全部層跑完才接一次真實環境微調——
+    差別只在每輪的對齊方式從 OT 換成 TIES 合併。
+
+    TIES 各層獨立計算，不像 OT 的 recursive 版本需要逐層鏈式傳遞 T（也因此沒有
+    「第一層 T=I / 深層鏈式 T」這種分支，見 ties_fuse_single_layer 的 docstring），
+    dad/mom 對應層的交叉通道每輪比對的目標也是固定的（dad/mom 自己的 pure 權重
+    不會變），所以這裡不需要 recursive_ot_fuse_single_layer / _iterative_refine_
+    single_layer 那種「round 1 用一種公式、round 2+ 換一種公式（改成比對剛訓練過的
+    值）」的區分：每一輪都呼叫同一個 ties_fuse_single_layer，用衰減的 alpha_t 跟
+    child 目前的交叉通道值取加權平均，讓 TIES 的介入強度隨 round 慢慢退場（語意跟
+    OT 版本的 alpha_init/alpha_gamma 退火排程完全相同），中間穿插蒸餾消化每輪的
+    擾動，讓訓練逐步吸收每一次 TIES 覆寫的效果。
+
+    k：TIES top-k 保留比例（見 _ties_block 的 trim 步驟），對應 OT 版本簽名中
+    ot_frac 的位置，但語意不同（k 是每個 task vector 保留的參數比例，不是覆寫
+    列數的比例）。
+    """
+    policy = child_agent.policy
+    layer_names = _fusable_layer_names(policy)
+    n_layers = len(layer_names)
+    n_stages_to_run = n_layers if max_stages is None else min(max_stages, n_layers)
+    print(f"[Progressive Iterative TIES] 共 {n_layers} 層可融合，這次跑前 {n_stages_to_run} 層，"
+          f"每層 {n_rounds} 輪，每輪用蒸餾（凍結純通道，{distill_epochs} epoch）消化 TIES 擾動")
+
+    # 蒸餾資料只需要讀一次，之後每輪都重複使用，避免同一份檔案被反覆從硬碟讀取
+    distill_blob = torch.load(distill_pt, map_location="cpu")
+
+    for stage in range(n_stages_to_run):
+        for round_idx in range(n_rounds):
+            alpha_t = alpha_init * (alpha_gamma ** round_idx)
+            fused_name = ties_fuse_single_layer(policy, dad_policy, mom_policy, stage, k=k, alpha=alpha_t)
+
+            if fused_name is None:
+                print(f"[Progressive Iterative TIES] stage {stage+1} 找不到對應層，跳過")
+                break
+
+            print(f"\n[Progressive Iterative TIES] stage {stage+1}/{n_stages_to_run} 層 {fused_name}  "
+                  f"round {round_idx+1}/{n_rounds}（alpha={alpha_t:.4f}）：TIES 合併完成（含初始交叉通道值），用蒸餾消化這次擾動")
+
+            distill_crosstalk_baseline(
+                child_agent, distill_pt, epochs=distill_epochs, lr=distill_lr,
+                device=device, zero_init=False, preloaded_blob=distill_blob,
+            )
+
+    if n_stages_to_run < n_layers:
+        remaining = layer_names[n_stages_to_run:]
+        print(f"[Progressive Iterative TIES] 已跑完前 {n_stages_to_run} 層，"
+              f"剩下 {len(remaining)} 層維持原始拼接值，不做 TIES：{remaining}")
+    else:
+        print("[Progressive Iterative TIES] 全部層融合完成。")
+
+    if pre_finetune_save_path and final_finetune_steps > 0:
+        os.makedirs(os.path.dirname(pre_finetune_save_path) or ".", exist_ok=True)
+        with open(pre_finetune_save_path, "wb") as f:
+            cloudpickle.dump(policy, f)
+        print(f"[Progressive Iterative TIES] 已儲存「PPO 微調前」的純 TIES+蒸餾初始化模型：{pre_finetune_save_path}")
+
+    if final_finetune_steps > 0:
+        _rebuild_policy_optimizer(policy)
+        auto_difficulty_callback = None
+        if env is not None:
+            auto_difficulty_callback = AutoDifficultyCallback(
+                env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
+                shared_flags=None, cooldown_steps=0, hardseed_save_path="./logs/hard_seeds.json",
+            )
+            print("[Progressive Iterative TIES] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
+        print(f"\n[Progressive Iterative TIES] 全部層蒸餾消化完成，開始最終真實環境微調，共 {final_finetune_steps} 步")
+        callbacks = [auto_difficulty_callback] if auto_difficulty_callback is not None else []
+        child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
 
 
 def _ot_block(dad_block: torch.Tensor, mom_block: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
@@ -2750,6 +2858,460 @@ def _fusable_layer_names(policy: nn.Module) -> List[str]:
     return names
 
 
+def _row_normalize(M: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    """把每一列縮放成和為 1。用在轉置之後——轉置會讓原本正規化過的方向失效。"""
+    return M / M.sum(dim=1, keepdim=True).clamp(min=eps)
+
+
+def _emd_map(Xt: torch.Tensor, Xs: torch.Tensor, warn_tag: str = "") -> torch.Tensor:
+    """
+    用 POT 的高階封裝 ot.da.EMDTransport 求傳輸映射,成本矩陣(metric='sqeuclidean')
+    與邊際質量(distribution_estimation_uniform)全部走套件預設,不自己算。
+
+    回傳 (Xt 列數, Xs 列數) 的映射矩陣,每一列和為 1:第 i 列代表「Xt 的第 i 列
+    對應到 Xs 的哪幾列、各佔多少權重」。因此
+
+        T @ Xs  ≡  EMDTransport().fit(Xs, Xt).inverse_transform(Xt)
+
+    之所以不直接回傳 inverse_transform 的結果、而是把映射矩陣本身交出來:雙通道
+    寫回時同一個映射要套用到「跟 fit 時不同的矩陣」上（例如欄位語意不同的版本），
+    而且論文 Algorithm 1 的鏈式重排也需要拿到排列本身。這正是論文程式碼要用
+    np.argwhere(aligned_Xs == Xs[w]) 去反推索引的原因——拿不到映射矩陣。
+    """
+    import ot as pot
+    dev = Xs.device
+    tr = pot.da.EMDTransport()
+    tr.fit(Xs=Xs.detach().cpu().double().numpy(),
+           Xt=Xt.detach().cpu().double().numpy())
+    coupling = np.asarray(tr.coupling_)                 # (n_s, n_t)
+    T = coupling.T                                       # (n_t, n_s)
+    T = T / np.maximum(T.sum(axis=1, keepdims=True), 1e-12)   # 跟 inverse_transform 同一套正規化
+
+    # 兩邊列數相同 + 均勻質量時,EMD 的解理論上會是硬排列;n 很小(例如 action_net
+    # 的 oh=2)比較容易出現並列而退化成分數解,這裡出個聲提醒,不擋流程。
+    nz = (T > 1e-9).sum(axis=1)
+    if nz.max() > 1:
+        print(f"  [EMD] {warn_tag} 傳輸映射不是硬排列(每列非零最多 {nz.max()} 個),"
+              f"套用結果會是多列的加權混合而非單純重排")
+    return torch.from_numpy(T).to(device=dev, dtype=torch.float32)
+
+
+def _actor_layer_names(policy: nn.Module) -> List[str]:
+    """
+    論文 (arXiv:2207.00978, Renaissance Robot) 的層集合:actor 那一條路徑的全部權重
+    矩陣（policy_net 各層 + action_net），完全不含 critic。
+
+    跟 _fusable_layer_names 剛好互補：那邊跳過 action_net、保留 value_net 隱藏層，
+    因為那條流程每個 stage 都要用真實 PPO 訓練，需要 value function 的 advantage 估計；
+    這邊照論文只動 actor，value_net 完全交給後續 PPO 自己重新學。
+
+    ⚠️ action_net 在這裡被當成「可拆半」的層處理（上半列算 dad、下半列算 mom），
+    這跟 create_dual_channel_policy 的設計相反——那邊刻意整層沿用 dad 權重不拆，
+    理由是輸出維度是各關節扭矩、神經元不可互換。這是使用者指定要重現論文行為而
+    刻意接受的偏離，不是疏漏；如果 child 一開跑就崩潰，第一個要懷疑的就是這層。
+    """
+    names = []
+    for name, m in policy.named_modules():
+        if not isinstance(m, nn.Linear) or "value_net" in name:
+            continue
+        W = m.weight.data
+        if W.shape[0] // 2 > 0 and W.shape[1] // 2 > 0:
+            names.append(name)
+    return names
+
+
+@torch.no_grad()
+def paper_style_ot_fuse(
+    child_policy: nn.Module,
+    dad_policy: nn.Module,
+    mom_policy: nn.Module,
+    align_source: str = "pure",
+    average: bool = True,
+) -> List[str]:
+    """
+    照論文 (arXiv:2207.00978) 官方 cheetah.ipynb 的 align_nodes 結構做「單趟逐層」OT 對齊。
+
+    跟 progressive_iterative_ot_evolve 的差別：
+      - 每層只對齊「一次」，沒有 n_rounds 內層迴圈、中間不穿插蒸餾
+      - 層集合改成 actor 那條路徑（含 action_net、不含 value_net），見 _actor_layer_names
+      - 對齊完取平均寫回（average=True），對應論文的 fused = (A + B′) / 2
+    保留的部分：雙通道架構不變，只寫兩個交叉通道區塊，純通道完全不動。
+
+    鏈式傳遞（論文 Algorithm 1 的 `if i > 0`）：上一層算出的排列，用來重排這一層
+    source 側的「欄位」。只有 source 需要重排，target 從頭到尾沒被搬動過。
+    T_prev 一律維持 (dad 列, mom 欄) 的方向。
+
+    align_source 決定拿哪兩個矩陣去餵 OT（三種都是使用者要求要實驗比較的變體）：
+      "pure"       Xt = dad 純通道 W[:oh,:ih]（固定基準）
+                   Xs = mom 純通道 W[oh:,ih:]（被搬動）
+                   最直接對應論文的「兩個 agent 的同一層」，也是 recursive_ot 系列在用的。
+      "cross"      Xt = X_dm 交叉區塊 W[oh:,:ih]，Xs = X_md 交叉區塊 W[:oh,ih:]
+                   照使用者註解的字面對應。兩者欄位語意方向相反，寫回 X_md 時需要
+                   額外把欄位從 dad 側翻回 mom 側。
+      "cross_pure" Xs = X_md 交叉區塊、Xt = mom 純通道（另一邊對稱），
+                   _iterative_refine_single_layer 在用的那組公式。兩邊欄位語意天生
+                   一致（都讀 mom 那半邊的輸入），所以這個模式不需要重排欄位。
+
+    average=True 時寫入 0.5 * (交叉區塊目前的值 + OT 對齊後的值)。之所以是「跟目前
+    的值」平均而不是「跟另一個 parent 的同層」平均：論文把兩個網路塌縮成同一組權重，
+    所以有一個格子同時裝得下兩邊；雙通道把兩邊分開保留，交叉區塊是唯一被寫入的地方，
+    因此平均的對象只能是這個格子自己原本的值。
+
+    回傳實際被融合的層名。
+    """
+    if align_source not in ("pure", "cross", "cross_pure"):
+        raise ValueError(f"align_source 只能是 pure / cross / cross_pure，收到 {align_source!r}")
+
+    layer_names   = _actor_layer_names(child_policy)
+    dad_modules   = dict(dad_policy.named_modules())
+    mom_modules   = dict(mom_policy.named_modules())
+    child_modules = dict(child_policy.named_modules())
+    dev = next(child_policy.parameters()).device
+
+    print(f"[Paper OT] 單趟逐層對齊，共 {len(layer_names)} 層：{layer_names}")
+    print(f"[Paper OT] align_source={align_source}，寫回方式={'0.5 平均' if average else '直接覆寫'}")
+
+    T_prev = None      # (dad 列, mom 欄) 的排列，由上一層算出
+    fused_names = []
+
+    for name in layer_names:
+        dad_m, mom_m = dad_modules.get(name), mom_modules.get(name)
+        if dad_m is None or mom_m is None:
+            print(f"  [Paper OT] 層 {name} 在 dad/mom 找不到對應，跳過")
+            continue
+
+        W  = child_modules[name].weight.data
+        Wd = dad_m.weight.data.to(dev)
+        Wm = mom_m.weight.data.to(dev)
+        oh, ih = W.shape[0] // 2, W.shape[1] // 2
+        if oh == 0 or ih == 0:
+            continue
+
+        Wd_pure = Wd[:oh, :ih].float()      # dad 列、dad 欄
+        Wm_pure = Wm[oh:, ih:].float()      # mom 列、mom 欄
+        X_md    = W[:oh, ih:].clone().float()   # dad 列、mom 欄
+        X_dm    = W[oh:, :ih].clone().float()   # mom 列、dad 欄
+
+        if T_prev is not None and T_prev.shape[0] != ih:
+            print(f"  [Paper OT] 層 {name}：上一層排列寬度 {T_prev.shape[0]} 對不上本層輸入半寬 {ih}，重置鏈式傳遞")
+            T_prev = None
+        # mom 欄 → dad 欄 用 T_prev.t()；dad 欄 → mom 欄 用 T_prev
+        to_dad_cols = None if T_prev is None else T_prev.t()
+
+        if align_source == "pure":
+            Xt = Wd_pure
+            Xs = Wm_pure if to_dad_cols is None else Wm_pure @ to_dad_cols
+            T = _emd_map(Xt, Xs, f"{name}/pure")          # (dad 列, mom 列)
+            aligned_md = T @ Wm_pure                      # mom 列翻成 dad 順序，欄維持 mom 側
+            aligned_dm = _row_normalize(T.t()) @ Wd_pure  # dad 列翻成 mom 順序，欄維持 dad 側
+            T_next = T
+
+        elif align_source == "cross":
+            Xt = X_dm                                     # mom 列、dad 欄
+            Xs = X_md if to_dad_cols is None else X_md @ to_dad_cols
+            T = _emd_map(Xt, Xs, f"{name}/cross")         # (mom 列, dad 列)
+            aligned_dm = T @ Xs                           # dad 列翻成 mom 順序，欄已是 dad 側
+            aligned_md = _row_normalize(T.t()) @ X_dm     # mom 列翻成 dad 順序，但欄是 dad 側
+            if T_prev is not None:                        # 欄位從 dad 側翻回 mom 側，才對得上 X_md 的格子
+                aligned_md = aligned_md @ T_prev
+            T_next = _row_normalize(T.t())
+
+        else:  # cross_pure：兩邊欄位語意天生一致，不需要重排欄位
+            T_md = _emd_map(X_md, Wm_pure, f"{name}/cross_pure-md")   # (dad 列, mom 列)
+            T_dm = _emd_map(X_dm, Wd_pure, f"{name}/cross_pure-dm")   # (mom 列, dad 列)
+            aligned_md = T_md @ Wm_pure
+            aligned_dm = T_dm @ Wd_pure
+            T_next = T_md
+
+        if average:
+            new_md = 0.5 * (X_md + aligned_md)
+            new_dm = 0.5 * (X_dm + aligned_dm)
+        else:
+            new_md, new_dm = aligned_md, aligned_dm
+
+        W[:oh, ih:] = new_md.to(W.dtype)
+        W[oh:, :ih] = new_dm.to(W.dtype)
+
+        T_prev = T_next
+        fused_names.append(name)
+        reorder_note = "已用上一層排列重排欄位" if to_dad_cols is not None else "第一層，不需重排欄位"
+        if align_source == "cross_pure":
+            reorder_note = "欄位語意天生一致，不需重排"
+        print(f"  [Paper OT] 層 {name} 對齊完成（oh={oh}, ih={ih}，{reorder_note}）")
+
+    return fused_names
+
+
+def paper_style_ot_evolve(
+    child_agent: "PPO",
+    dad_policy: nn.Module,
+    mom_policy: nn.Module,
+    distill_pt: Optional[str] = None,
+    env=None,
+    align_source: str = "pure",
+    average: bool = True,
+    distill_epochs: int = 5,
+    distill_lr: float = 0.008,
+    final_finetune_steps: int = 1_000_000,
+    device: str = "cuda",
+    pre_finetune_save_path: Optional[str] = None,
+):
+    """
+    論文 (arXiv:2207.00978) 的「單趟逐層對齊」，接上這個專案原本的消化流程：
+
+      1. paper_style_ot_fuse()：三層依序各對齊一次，排列鏈式往下傳，寫回交叉通道
+      2. distill_crosstalk_baseline(zero_init=False)：凍結純通道，只蒸餾交叉通道，
+         讓網路消化這次對齊造成的擾動；蒸餾結束後該函式會自己移除梯度遮罩 hook
+         並把全部參數解凍
+      3. 解凍後的整個網路丟回真實環境跑 PPO（含 AutoDifficultyCallback 難度爬升）
+
+    跟 progressive_iterative_ot_evolve 的差別只剩「對齊做幾次」：那邊是外層逐層 ×
+    內層逐輪、每一輪都蒸餾一次（4 層 × 5~10 輪 = 20~40 次蒸餾）；這邊照論文每層只
+    對齊一次，全部對齊完只蒸餾一次。
+
+    zero_init=False 是關鍵：交叉通道剛被 OT 寫入對齊值，蒸餾只是要消化擾動，
+    不能把它歸零洗掉重來。
+
+    distill_pt 給 None 或檔案不存在時就跳過蒸餾，直接進 PPO（等同論文原本的節奏）。
+    """
+    policy = child_agent.policy
+    fused_names = paper_style_ot_fuse(
+        policy, dad_policy, mom_policy,
+        align_source=align_source, average=average,
+    )
+    print(f"[Paper OT] 融合完成，共 {len(fused_names)} 層：{fused_names}")
+
+    if distill_pt and os.path.exists(distill_pt):
+        print(f"\n[Paper OT] 凍結純通道，蒸餾交叉通道消化這次對齊（{distill_epochs} epoch，資料：{distill_pt}）")
+        distill_crosstalk_baseline(
+            child_agent, distill_pt, epochs=distill_epochs, lr=distill_lr,
+            device=device, zero_init=False,
+        )
+    elif distill_pt:
+        print(f"\n[Paper OT] ⚠️ 找不到蒸餾資料 {distill_pt}，跳過蒸餾直接進入環境訓練")
+    else:
+        print("\n[Paper OT] 未指定蒸餾資料，跳過蒸餾直接進入環境訓練")
+
+    if pre_finetune_save_path and final_finetune_steps > 0:
+        os.makedirs(os.path.dirname(pre_finetune_save_path) or ".", exist_ok=True)
+        with open(pre_finetune_save_path, "wb") as f:
+            cloudpickle.dump(policy, f)
+        print(f"[Paper OT] 已儲存「PPO 微調前」的純 OT+蒸餾初始化模型：{pre_finetune_save_path}")
+
+    if final_finetune_steps > 0:
+        # 蒸餾已經解凍全部參數，這裡重建 optimizer 讓它涵蓋整個網路
+        _rebuild_policy_optimizer(policy)
+        callbacks = []
+        if env is not None:
+            callbacks.append(AutoDifficultyCallback(
+                env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
+                shared_flags=None, cooldown_steps=0, hardseed_save_path="./logs/hard_seeds.json",
+            ))
+            print("[Paper OT] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
+        print(f"\n[Paper OT] 解凍全網，進入真實環境訓練，共 {final_finetune_steps} 步")
+        child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 論文 (arXiv:2207.00978) 的「塌縮成單一網路」融合
+#
+# 跟上面 paper_style_ot_* 的差別：那組保留雙通道架構、只寫交叉通道；這組是論文
+# 真正的做法——把兩個網路的神經元一對一配對後直接平均，產生一個跟單一 parent
+# 同寬的網路，沒有雙通道、沒有交叉通道的概念。
+# ══════════════════════════════════════════════════════════════════════════
+_PAPER_W_KEYS = ["mlp_extractor.policy_net.0.weight",
+                 "mlp_extractor.policy_net.2.weight",
+                 "action_net.weight"]
+_PAPER_B_KEYS = ["mlp_extractor.policy_net.0.bias",
+                 "mlp_extractor.policy_net.2.bias",
+                 "action_net.bias"]
+
+
+def _paper_align_nodes(layer_weights_all, stop_layer_k: int = 3,
+                       col_dir: str = "fixed", verbose: bool = True):
+    """
+    論文 cheetah.ipynb 的 align_nodes（370-401 行），加上一個欄位重排方向的開關。
+
+    col_dir="paper"：照論文寫的 w[alignment_idx]。已驗證與原版逐位元相同。
+    col_dir="fixed"：改成 w[argsort(alignment_idx)]。
+
+    ⚠️ 論文那個方向是反的。inverse_transform 產生的列順序等於 Xs[argsort(perm)]，
+    所以下一層欄位也必須用 argsort(perm) 才對得起來。實測：對單一模型套用論文方向
+    後動作輸出最大變化 10.17（等於換成另一個網路），用 argsort(perm) 則是 1.9e-06
+    （只有 float32 誤差）。這個 bug 讓第 2、3 層拿到的 source 權重欄位是亂的，
+    融合結果從 +282 掉到 -110。
+
+    排列索引改用耦合矩陣反推，不用論文的 np.argwhere(aligned_Xs == Xs[w])[0][0]
+    ——那行比對的是「任一元素相等」而非「整列相等」，理論上會抓錯列。兩者在
+    model2/model3 上實測結果相同。
+    """
+    import ot as pot
+    assert col_dir in ("paper", "fixed"), f"col_dir 只能是 paper / fixed，收到 {col_dir!r}"
+
+    perms, alignment_idx = [], None
+    for i in range(stop_layer_k):
+        for j in range(1, len(layer_weights_all)):
+            Xs = layer_weights_all[j][i].copy()
+            Xt = layer_weights_all[0][i]
+
+            if i > 0 and alignment_idx is not None:      # 論文的 `if i > 0`
+                col_idx = alignment_idx if col_dir == "paper" else np.argsort(alignment_idx)
+                Xs = Xs[:, col_idx]
+
+            tr = pot.da.EMDTransport()                   # cost / marginals 全走套件預設
+            tr.fit(Xs=Xs, Xt=Xt)
+            layer_weights_all[j][i] = tr.inverse_transform(Xt=Xt)
+
+            alignment_idx = np.asarray(tr.coupling_).argmax(axis=1)
+            perms.append(alignment_idx)
+            if verbose:
+                n_uniq = len(np.unique(alignment_idx))
+                print(f"  [Paper Single] 層 {i} shape={Xs.shape} 配對完成，"
+                      f"排列涵蓋 {n_uniq}/{len(alignment_idx)} 個位置"
+                      f"{'' if n_uniq == len(alignment_idx) else ' ⚠️ 不是合法排列'}")
+    return layer_weights_all, perms
+
+
+@torch.no_grad()
+def paper_single_net_fuse(dad_policy: nn.Module, mom_policy: nn.Module,
+                          col_dir: str = "fixed", fuse_bias: bool = True):
+    """
+    對齊 dad / mom 的神經元後平均，回傳 (fused_W, fused_B or None)。
+    dad 當論文的 target（全程不動），mom 當 source（被重排對齊到 dad）。
+
+    fuse_bias=False 時回傳 fused_B=None，對應論文的行為——它完全不碰 bias，
+    融合模型的 bias 就維持新建 PPO 的隨機初始值。實測把 bias 也照同一組排列
+    對齊後平均會更好（281.9 vs 270.4，標準差 1.5 vs 2.9）。
+    """
+    dsd, msd = dad_policy.state_dict(), mom_policy.state_dict()
+    W1 = [dsd[k].detach().cpu().numpy().copy() for k in _PAPER_W_KEYS]
+    W2 = [msd[k].detach().cpu().numpy().copy() for k in _PAPER_W_KEYS]
+
+    aligned, perms = _paper_align_nodes([W1, [w.copy() for w in W2]], 3, col_dir=col_dir)
+    fused_W = [(aligned[0][i] + aligned[1][i]) / 2.0 for i in range(3)]
+
+    fused_B = None
+    if fuse_bias:
+        B1 = [dsd[k].detach().cpu().numpy().copy() for k in _PAPER_B_KEYS]
+        B2 = [msd[k].detach().cpu().numpy().copy() for k in _PAPER_B_KEYS]
+        for i in range(2):                       # 只有兩層隱藏層的神經元被重排過
+            B2[i] = B2[i][np.argsort(perms[i])]
+        fused_B = [(B1[i] + B2[i]) / 2.0 for i in range(3)]
+
+    return fused_W, fused_B
+
+
+def paper_single_net_evolve(
+    child_agent: "PPO",
+    dad_policy: nn.Module,
+    mom_policy: nn.Module,
+    env=None,
+    col_dir: str = "fixed",
+    fuse_bias: bool = True,
+    distill_pt: Optional[str] = None,
+    distill_epochs: int = 5,
+    distill_lr: float = 1e-4,
+    device: str = "cuda",
+    final_finetune_steps: int = 1_000_000,
+    pre_finetune_save_path: Optional[str] = None,
+    use_curriculum: bool = False,
+    curriculum_hardseeds_path: str = "./logs/hard_seeds_curriculum.json",
+):
+    """
+    論文 cheetah.ipynb 的完整流程：align_nodes → 平均 → replace_policy → learn()。
+
+    會把 child_agent.policy 整個換成一個「全新初始化」的 policy 再灌入融合權重，
+    刻意不沿用 create_dual_channel_policy 的雙通道拼接結果——論文的 replace_policy
+    是塞進一個全新的 PPO，只覆寫 actor 的三個權重矩陣，bias 與整個 critic 都維持
+    新模型的隨機值。要讓結果可比就必須重現這個起點。
+
+    distill_pt：給了路徑就在 PPO 之前插入一段離線蒸餾（論文沒有這一步）。
+
+    ⚠️ 這裡用的是全網版的 train_network_offline，不是 distill_crosstalk_baseline。
+    後者綁在雙通道架構上——它用 freeze_pure_channels 凍結左上/右下象限、只訓練
+    交叉區塊；但這個模式產生的是單一網路，沒有純通道/交叉通道的區分，照象限切一半
+    凍結是沒有意義的。所以這裡全部參數一起蒸餾（含 critic，正好補上它從隨機初始
+    開始這個弱點）。
+
+    final_finetune_steps 對應論文的 fused_model.learn(total_timesteps=5e5)，
+    這裡預設 1e6 以對齊本專案其他實驗的步數。
+    """
+    fused_W, fused_B = paper_single_net_fuse(
+        dad_policy, mom_policy, col_dir=col_dir, fuse_bias=fuse_bias)
+    print(f"[Paper Single] 融合完成（col_dir={col_dir}，bias={'一起融合' if fuse_bias else '維持新模型隨機值（照論文）'}）")
+
+    # 論文的 replace_policy：起點是一個全新的 PPO，不是雙通道拼接的網路
+    fresh = PPO("MlpPolicy", env, verbose=0, seed=1) if env is not None else None
+    if fresh is not None:
+        child_agent.policy = fresh.policy.to(child_agent.device)
+        print("[Paper Single] 已把 policy 換成全新初始化的網路（bias / critic 為隨機值，照論文）")
+
+    policy = child_agent.policy
+    sd = policy.state_dict()
+    for k, w in zip(_PAPER_W_KEYS, fused_W):
+        sd[k] = torch.as_tensor(np.ascontiguousarray(w), dtype=sd[k].dtype)
+    if fused_B is not None:
+        for k, b in zip(_PAPER_B_KEYS, fused_B):
+            sd[k] = torch.as_tensor(np.ascontiguousarray(b), dtype=sd[k].dtype)
+    policy.load_state_dict(sd)
+    policy.to(child_agent.device)
+    print(f"[Paper Single] 已灌入 {len(fused_W)} 個融合權重矩陣"
+          f"{f' + {len(fused_B)} 組 bias' if fused_B is not None else ''}")
+
+    if distill_pt and os.path.exists(distill_pt):
+        print(f"\n[Paper Single] 全網離線蒸餾（{distill_epochs} epoch，資料：{distill_pt}）")
+        unfreeze_all(policy)
+        policy.optimizer = torch.optim.Adam(policy.parameters(), lr=distill_lr, weight_decay=0.0)
+        train_network_offline(
+            ppo_model=child_agent, pt_path=distill_pt,
+            optimizer=policy.optimizer, epochs=distill_epochs,
+            vf_coef=0.5, device=device, base_lr=distill_lr,
+        )
+        unfreeze_all(policy)
+    elif distill_pt:
+        print(f"\n[Paper Single] ⚠️ 找不到蒸餾資料 {distill_pt}，跳過蒸餾")
+
+    if pre_finetune_save_path and final_finetune_steps > 0:
+        os.makedirs(os.path.dirname(pre_finetune_save_path) or ".", exist_ok=True)
+        with open(pre_finetune_save_path, "wb") as f:
+            cloudpickle.dump(policy, f)
+        print(f"[Paper Single] 已儲存「PPO 訓練前」的純融合模型：{pre_finetune_save_path}")
+
+    if final_finetune_steps > 0:
+        _rebuild_policy_optimizer(policy)
+        callbacks = []
+        if env is not None:
+            # 兩個 callback 必須共用同一個 dict：CurriculumCallback 複習期間會把
+            # reviewing 設成 True，AutoDifficultyCallback 看到就會暫停難度升級。
+            shared_flags = {"reviewing": False}
+
+            if use_curriculum:
+                # CurriculumCallback 的 _test_and_remove_badseeds 會把「學會的」seed
+                # 從池子裡永久刪除並寫回檔案。主池 hard_seeds.json 有 24 萬個 seed、
+                # 而且 compare_models 等評估工具也在讀它，所以複習只動一份副本。
+                if not os.path.exists(curriculum_hardseeds_path):
+                    os.makedirs(os.path.dirname(curriculum_hardseeds_path) or ".", exist_ok=True)
+                    shutil.copy2("./logs/hard_seeds.json", curriculum_hardseeds_path)
+                    print(f"[Paper Single] 已複製 hard_seeds 副本供複習使用：{curriculum_hardseeds_path}")
+                callbacks.append(CurriculumCallback(
+                    difficulty_list=[round(x * 0.05, 2) for x in range(21)],
+                    eval_env=env,
+                    hardseeds_path=curriculum_hardseeds_path,
+                    switch_freq=200_000, review_steps=60_000,
+                    hardseed_reward_threshold=250, hardseed_n_eval=10,
+                    verbose=1, shared_flags=shared_flags, cooldown_steps=30_000,
+                ))
+                print("[Paper Single] 已接上 CurriculumCallback（hard-seed 複習，複習期間暫停難度升級）")
+
+            callbacks.append(AutoDifficultyCallback(
+                env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
+                shared_flags=shared_flags, cooldown_steps=0, hardseed_save_path="./logs/hard_seeds.json",
+            ))
+            print("[Paper Single] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
+        print(f"\n[Paper Single] 進入真實環境訓練，共 {final_finetune_steps} 步")
+        child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+
+
 @torch.no_grad()
 def recursive_ot_fuse_single_layer(
     child_policy: nn.Module,
@@ -3334,6 +3896,24 @@ def progressive_recursive_ot_evolve(
         print("[Progressive OT] 全部層融合完成。")
 
 
+def _crossover_tag(args) -> str:
+    """
+    預設存檔路徑用的識別字串。ot_paper 有三種 align_source 變體，要各自帶上後綴，
+    否則三次實驗會寫到同一個檔案互相覆蓋。
+    """
+    tag = args.crossover
+    if tag == "ot_paper":
+        tag = f"{tag}_{getattr(args, 'ot_paper_source', 'pure')}"
+    elif tag == "ot_paper_single":
+        bias = "nobias" if getattr(args, "ot_paper_no_bias_fuse", False) else "bias"
+        tag = f"{tag}_{getattr(args, 'ot_paper_col_dir', 'fixed')}_{bias}"
+        if getattr(args, "ot_paper_distill", False):
+            tag = f"{tag}_distill"
+        if getattr(args, "ot_paper_curriculum", False):
+            tag = f"{tag}_curric"
+    return tag
+
+
 def _pre_finetune_out_path(args) -> Optional[str]:
     """
     推導「PPO 微調前」那份初始化模型要存去哪。
@@ -3343,7 +3923,7 @@ def _pre_finetune_out_path(args) -> Optional[str]:
     explicit = getattr(args, "progressive_pre_finetune_out", None)
     if explicit is not None:
         return explicit or None
-    final_path = getattr(args, "ties_out", None) or f"./models/ties_test_child_{args.crossover}.pkl"
+    final_path = getattr(args, "ties_out", None) or f"./models/ties_test_child_{_crossover_tag(args)}.pkl"
     base, ext = os.path.splitext(final_path)
     return f"{base}_preppo{ext or '.pkl'}"
 
@@ -3952,7 +4532,7 @@ def compare_models():
     def _ext(path):
         return "pkl" if path.endswith(".pkl") else "zip"
 
-    child_path = args.ties_out or f"./models/ties_test_child_{args.crossover}.pkl"
+    child_path = args.ties_out or f"./models/ties_test_child_{_crossover_tag(args)}.pkl"
     models_to_test = {}
     if args.dad:
         models_to_test["Dad"] = {"path": args.dad, "type": _ext(args.dad)}
@@ -4746,19 +5326,35 @@ if __name__ == "__main__":
     parser.add_argument("--progressive_no_anneal", action="store_true",
                          help="ot_progressive 不做漸進退火，每個 stage 一開始就直接是完整 OT 值，用來對照有無退火的差異")
     parser.add_argument("--progressive_n_rounds", type=int, default=10,
-                         help="ot_progressive_iter 每一層內層迴圈跑幾輪 OT→訓練（預設 10）")
+                         help="ot_progressive_iter(_focused) / ties_progressive_iter 每一層內層迴圈跑幾輪 對齊→蒸餾（預設 10）")
     parser.add_argument("--progressive_steps_per_round", type=int, default=1_000_000,
-                         help="ot_progressive_iter 全部層蒸餾消化完之後，最終真實環境微調的步數（預設 100 萬步）")
+                         help="ot_progressive_iter(_focused) / ties_progressive_iter 全部層蒸餾消化完之後，最終真實環境微調的步數（預設 100 萬步）")
     parser.add_argument("--progressive_pre_finetune_out", type=str, default=None,
-                         help="ot_progressive_iter(_focused) 在最終 PPO 微調『開始之前』額外存一份純 OT+蒸餾初始化模型的路徑；不給則自動用 <ties_out 去掉副檔名>_preppo.pkl。設成空字串可停用")
+                         help="ot_progressive_iter(_focused) / ties_progressive_iter 在最終 PPO 微調『開始之前』額外存一份純融合+蒸餾初始化模型的路徑；不給則自動用 <ties_out 去掉副檔名>_preppo.pkl。設成空字串可停用")
     parser.add_argument("--progressive_ot_alpha_init", type=float, default=1.0,
                          help="ot_progressive_iter(_focused) 每個 stage 第一輪(round_idx=0)的 OT 介入強度 alpha（預設 1.0＝第一輪完整套用 OT，大力對齊）")
     parser.add_argument("--progressive_ot_gamma", type=float, default=0.7169,
                          help="ot_progressive_iter(_focused) alpha 隨 round 的指數衰減率：alpha_t = alpha_init * gamma**round_idx（預設 0.7169，搭配 progressive_n_rounds=10 時最後一輪 alpha≈0.05，幾乎退化到跟 distill_only 一樣；若改動 n_rounds 需重新用 gamma=(alpha_target/alpha_init)**(1/(n_rounds-1)) 反推）")
+    parser.add_argument("--progressive_ties_alpha_init", type=float, default=1.0,
+                         help="ties_progressive_iter 每個 stage 第一輪(round_idx=0)的 TIES 介入強度 alpha（預設 1.0＝第一輪完整套用 TIES 合併值，大力對齊），語意跟 --progressive_ot_alpha_init 相同，只是套用在 TIES 那條流程上")
+    parser.add_argument("--progressive_ties_gamma", type=float, default=0.7169,
+                         help="ties_progressive_iter alpha 隨 round 的指數衰減率：alpha_t = alpha_init * gamma**round_idx，語意跟 --progressive_ot_gamma 相同（預設同樣是 0.7169，搭配 progressive_n_rounds=10）")
+    parser.add_argument("--ot_paper_source", type=str, default="pure", choices=["pure", "cross", "cross_pure"],
+                         help="ot_paper 用哪兩個矩陣去餵 OT：pure=dad純通道 vs mom純通道（最貼近論文的『兩個 agent 同一層』）, cross=X_dm 交叉區塊 vs X_md 交叉區塊, cross_pure=X_md 交叉區塊 vs 對側純通道（_iterative_refine_single_layer 那組公式）。三種變體的預設存檔路徑會自動帶上後綴，不會互相覆蓋")
+    parser.add_argument("--ot_paper_no_average", action="store_true",
+                         help="ot_paper 對齊完直接覆寫交叉通道，不跟原值取 0.5 平均（預設是照論文取平均）")
+    parser.add_argument("--ot_paper_col_dir", type=str, default="fixed", choices=["paper", "fixed"],
+                         help="ot_paper_single 下一層欄位重排的方向：paper=完全照論文的 w[alignment_idx]（已驗證與原版逐位元相同，但那個方向是反的，融合結果會崩到 -110）, fixed=w[argsort(alignment_idx)]（修正版，融合結果 +282）。預設 fixed")
+    parser.add_argument("--ot_paper_curriculum", action="store_true",
+                         help="ot_paper_single 訓練時額外掛上 CurriculumCallback（hard-seed 複習機制）。預設不掛——現有所有融合實驗都只有 AutoDifficultyCallback，難度單向上升、收集到的 hard seed 只寫檔不回放，等於沒有複習。複習只會動 ./logs/hard_seeds_curriculum.json 這份副本，不會改到主池")
+    parser.add_argument("--ot_paper_distill", action="store_true",
+                         help="ot_paper_single 在 PPO 之前插入一段全網離線蒸餾（論文沒有這一步）。用的是 train_network_offline 全網蒸餾，不是綁在雙通道上的 distill_crosstalk_baseline——單一網路沒有交叉通道可言")
+    parser.add_argument("--ot_paper_no_bias_fuse", action="store_true",
+                         help="ot_paper_single 不融合 bias，維持新建 PPO 的隨機初始值（完全照論文）。預設會把 bias 也照同一組排列對齊後平均，實測較好（281.9 vs 270.4）")
     parser.add_argument("--ot_frac", type=float, default=1.0,
                          help="OT 只覆寫交叉通道前多少比例的列（輸出神經元），其餘維持蒸餾基底/靜音；1.0=整塊覆寫（原本行為），適用 ot_progressive / ot_first_distill_rest")
-    parser.add_argument("--crossover", type=str, default="zero", choices=["zero", "ties", "ties_progressive", "ot", "ot_recursive", "ot_progressive", "ot_progressive_iter", "ot_progressive_iter_focused", "ot_reconstruct", "ot_iter", "ot_mutual", "ot_first_distill_rest", "distill_only"],
-                        help="交叉通道初始化方式：zero=小噪音（原版）, ties=TIES融合, ot=OT Fusion, ot_recursive=遞迴OT, ot_progressive_iter=漸進式逐層+逐輪迭代OT（每層固定輪數，OT↔蒸餾交替，每輪蒸餾全部交叉通道）, ot_progressive_iter_focused=跟 ot_progressive_iter 相同但每輪蒸餾只聚焦剛 OT 對齊過的那一層，其餘層凍結，開跑前先蒸餾全部交叉通道一次當基底, ot_iter=迭代OT（多次精化）, ot_mutual=兩通道互相OT融合收斂, ot_first_distill_rest=只對第一層做OT並凍結，其餘層改用蒸餾適應, distill_only=完全不做OT，全部交叉通道只用蒸餾（對照組）")
+    parser.add_argument("--crossover", type=str, default="zero", choices=["zero", "ties", "ties_progressive", "ties_progressive_iter", "ot", "ot_recursive", "ot_progressive", "ot_progressive_iter", "ot_progressive_iter_focused", "ot_paper", "ot_paper_single", "ot_reconstruct", "ot_iter", "ot_mutual", "ot_first_distill_rest", "distill_only"],
+                        help="交叉通道初始化方式：zero=小噪音（原版）, ties=TIES融合, ties_progressive=漸進式逐層TIES（退火版）, ties_progressive_iter=漸進式逐層+逐輪迭代TIES（跟 ot_progressive_iter 同一套外層逐層/內層逐輪+蒸餾流程，只是每輪的對齊方式從 OT 換成 TIES 合併）, ot=OT Fusion, ot_recursive=遞迴OT, ot_progressive_iter=漸進式逐層+逐輪迭代OT（每層固定輪數，OT↔蒸餾交替，每輪蒸餾全部交叉通道）, ot_progressive_iter_focused=跟 ot_progressive_iter 相同但每輪蒸餾只聚焦剛 OT 對齊過的那一層，其餘層凍結，開跑前先蒸餾全部交叉通道一次當基底, ot_paper=照 arXiv:2207.00978 的單趟逐層對齊（層集合改成 actor 路徑含 action_net、不含 value_net，每層只對齊一次、寫回取 0.5 平均；全部對齊完凍結純通道蒸餾交叉通道一次，再解凍丟回環境跑 PPO；搭配 --ot_paper_source 切換三種 Xs/Xt 組合）, ot_paper_single=論文真正的做法：不用雙通道，把兩個網路的神經元一對一配對後直接平均，塌縮成一個跟單一 parent 同寬的網路，灌進全新 PPO 後直接訓練（搭配 --ot_paper_col_dir / --ot_paper_no_bias_fuse）, ot_iter=迭代OT（多次精化）, ot_mutual=兩通道互相OT融合收斂, ot_first_distill_rest=只對第一層做OT並凍結，其餘層改用蒸餾適應, distill_only=完全不做OT，全部交叉通道只用蒸餾（對照組）")
     parser.add_argument("--ot_iters", type=int, default=5,
                         help="ot_iter 迭代次數（預設 5）；ot_mutual 的最大輪數（預設 20）")
     parser.add_argument("--ot_tol", type=float, default=1e-3,
@@ -5329,6 +5925,15 @@ if __name__ == "__main__":
                 elif args.crossover == "ot_progressive_iter_focused":
                     print("[crossover=ot_progressive_iter_focused] 漸進式逐層+逐輪迭代 OT（聚焦蒸餾版）：延後到 child_agent 建立後執行")
                     # 融合在 progressive_iterative_ot_evolve_focused 內進行
+                elif args.crossover == "ties_progressive_iter":
+                    print("[crossover=ties_progressive_iter] 漸進式逐層+逐輪迭代 TIES：延後到 child_agent 建立後執行")
+                    # 融合在 progressive_iterative_ties_evolve 內進行（需要 env 逐 stage、逐輪微調）
+                elif args.crossover == "ot_paper":
+                    print("[crossover=ot_paper] 論文式單趟逐層 OT：延後到 child_agent 建立後執行")
+                    # 融合在 paper_style_ot_evolve 內進行（融合完直接接 PPO）
+                elif args.crossover == "ot_paper_single":
+                    print("[crossover=ot_paper_single] 論文式單一網路融合：延後到 child_agent 建立後執行")
+                    # 融合在 paper_single_net_evolve 內進行（會把 policy 換成全新網路再灌融合權重）
                 else:
                     print("[crossover=zero] 用小噪音初始化交叉通道")
                     zero_initialize_crosstalk(child_policy)
@@ -5382,6 +5987,39 @@ if __name__ == "__main__":
                         device=str(child_agent.device),
                         alpha_init=args.progressive_ot_alpha_init,
                         alpha_gamma=args.progressive_ot_gamma,
+                    )
+                elif args.crossover == "ot_paper":
+                    # 論文式單趟逐層 OT：每層只對齊一次，對齊完蒸餾交叉通道一次，再解凍跑 PPO
+                    paper_style_ot_evolve(
+                        child_agent, dad.policy, mom.policy, DISTILL_PT,
+                        env=env,
+                        align_source=args.ot_paper_source,
+                        average=not args.ot_paper_no_average,
+                        final_finetune_steps=args.progressive_steps_per_round,
+                        device=str(child_agent.device),
+                    )
+                elif args.crossover == "ot_paper_single":
+                    # 論文真正的做法：塌縮成單一網路後直接訓練
+                    paper_single_net_evolve(
+                        child_agent, dad.policy, mom.policy, env=env,
+                        col_dir=args.ot_paper_col_dir,
+                        fuse_bias=not args.ot_paper_no_bias_fuse,
+                        distill_pt=DISTILL_PT if args.ot_paper_distill else None,
+                        device=str(child_agent.device),
+                        final_finetune_steps=args.progressive_steps_per_round,
+                        use_curriculum=args.ot_paper_curriculum,
+                    )
+                elif args.crossover == "ties_progressive_iter":
+                    # 跟 ot_progressive_iter 相同的漸進式逐層 + 逐輪迭代流程，只是對齊方式換成 TIES 合併
+                    progressive_iterative_ties_evolve(
+                        child_agent, dad.policy, mom.policy, DISTILL_PT,
+                        env=env,
+                        n_rounds=args.progressive_n_rounds,
+                        final_finetune_steps=args.progressive_steps_per_round,
+                        k=args.ties_k,
+                        device=str(child_agent.device),
+                        alpha_init=args.progressive_ties_alpha_init,
+                        alpha_gamma=args.progressive_ties_gamma,
                     )
                 elif args.crossover in ("ot", "ot_recursive"):
                     print(f"[crossover={args.crossover}] 保留 OT 融合交叉通道，跳過離線蒸餾")
@@ -5578,7 +6216,7 @@ if __name__ == "__main__":
         mom_avg = _eval(mom, "mom")
 
         # ── 雙通道融合 ───────────────────────────────────────────────
-        is_progressive = args.crossover in ("ot_progressive", "ot_progressive_iter", "ties_progressive", "ot_first_distill_rest", "distill_only")
+        is_progressive = args.crossover in ("ot_progressive", "ot_progressive_iter", "ot_progressive_iter_focused", "ties_progressive", "ties_progressive_iter", "ot_paper", "ot_paper_single", "ot_first_distill_rest", "distill_only")
         print(f"\n===== 雙通道融合 (crossover={args.crossover}) =====")
         child_policy = create_dual_channel_policy(dad.policy, mom.policy)
         if args.crossover == "ties":
@@ -5676,6 +6314,47 @@ if __name__ == "__main__":
                 child_model, dad.policy, mom.policy,
                 k=args.ties_k, steps_per_stage=args.progressive_steps_per_stage,
             )
+        elif args.crossover == "ot_paper":
+            print(f"\n===== 論文式單趟逐層 OT（align_source={args.ot_paper_source}，"
+                  f"寫回={'直接覆寫' if args.ot_paper_no_average else '0.5 平均'}，"
+                  f"對齊完蒸餾交叉通道一次，再解凍跑 PPO {args.progressive_steps_per_round} 步）=====")
+            paper_style_ot_evolve(
+                child_model, dad.policy, mom.policy, args.distill_pt, env=env,
+                align_source=args.ot_paper_source,
+                average=not args.ot_paper_no_average,
+                final_finetune_steps=args.progressive_steps_per_round,
+                device=str(child_model.device),
+                pre_finetune_save_path=_pre_finetune_out_path(args),
+            )
+        elif args.crossover == "ot_paper_single":
+            print(f"\n===== 論文式單一網路融合（col_dir={args.ot_paper_col_dir}，"
+                  f"bias={'不融合（照論文）' if args.ot_paper_no_bias_fuse else '一起融合'}，"
+                  f"{'全網蒸餾 + ' if args.ot_paper_distill else ''}PPO {args.progressive_steps_per_round} 步"
+                  f"{'，含 hard-seed 複習' if args.ot_paper_curriculum else ''}）=====")
+            paper_single_net_evolve(
+                child_model, dad.policy, mom.policy, env=env,
+                col_dir=args.ot_paper_col_dir,
+                fuse_bias=not args.ot_paper_no_bias_fuse,
+                distill_pt=args.distill_pt if args.ot_paper_distill else None,
+                device=str(child_model.device),
+                final_finetune_steps=args.progressive_steps_per_round,
+                pre_finetune_save_path=_pre_finetune_out_path(args),
+                use_curriculum=args.ot_paper_curriculum,
+            )
+        elif args.crossover == "ties_progressive_iter":
+            print(f"\n===== 漸進式逐層+逐輪迭代 TIES（每層 {args.progressive_n_rounds} 輪，每輪蒸餾消化，"
+                  f"最終微調 {args.progressive_steps_per_round} 步，max_stages={args.progressive_max_stages}）=====")
+            progressive_iterative_ties_evolve(
+                child_model, dad.policy, mom.policy, args.distill_pt, env=env,
+                n_rounds=args.progressive_n_rounds,
+                final_finetune_steps=args.progressive_steps_per_round,
+                max_stages=args.progressive_max_stages,
+                k=args.ties_k,
+                device=str(child_model.device),
+                alpha_init=args.progressive_ties_alpha_init,
+                alpha_gamma=args.progressive_ties_gamma,
+                pre_finetune_save_path=_pre_finetune_out_path(args),
+            )
         elif args.crossover == "ot_first_distill_rest":
             if os.path.exists(args.distill_pt):
                 print(f"\n===== OT 對齊第一層並凍結，其餘層蒸餾適應 (資料：{args.distill_pt}) =====")
@@ -5741,7 +6420,7 @@ if __name__ == "__main__":
         print("=" * 40)
 
         # ── 儲存 child ──────────────────────────────────────────────
-        out_path = args.ties_out or f"./models/ties_test_child_{args.crossover}.pkl"
+        out_path = args.ties_out or f"./models/ties_test_child_{_crossover_tag(args)}.pkl"
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         child_model.env = None
         with open(out_path, "wb") as f:
