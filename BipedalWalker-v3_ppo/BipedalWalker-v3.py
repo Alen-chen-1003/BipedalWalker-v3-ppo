@@ -2078,6 +2078,8 @@ def progressive_iterative_ties_evolve(
     alpha_init: float = 1.0,
     alpha_gamma: float = 0.7169,
     pre_finetune_save_path: Optional[str] = None,
+    diff_lr_scale: Optional[float] = None,
+    diff_lr_target: str = "cross",
 ):
     """
     跟 progressive_iterative_ot_evolve（見該函式 docstring）完全相同的外層逐層(stage)、
@@ -2139,7 +2141,7 @@ def progressive_iterative_ties_evolve(
         print(f"[Progressive Iterative TIES] 已儲存「PPO 微調前」的純 TIES+蒸餾初始化模型：{pre_finetune_save_path}")
 
     if final_finetune_steps > 0:
-        _rebuild_policy_optimizer(policy)
+        _diff_handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
         auto_difficulty_callback = None
         if env is not None:
             auto_difficulty_callback = AutoDifficultyCallback(
@@ -2150,6 +2152,8 @@ def progressive_iterative_ties_evolve(
         print(f"\n[Progressive Iterative TIES] 全部層蒸餾消化完成，開始最終真實環境微調，共 {final_finetune_steps} 步")
         callbacks = [auto_difficulty_callback] if auto_difficulty_callback is not None else []
         child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+        for _h in _diff_handles:
+            _h.remove()
 
 
 def _ot_block(dad_block: torch.Tensor, mom_block: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
@@ -3055,6 +3059,8 @@ def paper_style_ot_evolve(
     final_finetune_steps: int = 1_000_000,
     device: str = "cuda",
     pre_finetune_save_path: Optional[str] = None,
+    diff_lr_scale: Optional[float] = None,
+    diff_lr_target: str = "cross",
 ):
     """
     論文 (arXiv:2207.00978) 的「單趟逐層對齊」，接上這個專案原本的消化流程：
@@ -3100,7 +3106,7 @@ def paper_style_ot_evolve(
 
     if final_finetune_steps > 0:
         # 蒸餾已經解凍全部參數，這裡重建 optimizer 讓它涵蓋整個網路
-        _rebuild_policy_optimizer(policy)
+        _diff_handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
         callbacks = []
         if env is not None:
             callbacks.append(AutoDifficultyCallback(
@@ -3110,6 +3116,8 @@ def paper_style_ot_evolve(
             print("[Paper OT] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
         print(f"\n[Paper OT] 解凍全網，進入真實環境訓練，共 {final_finetune_steps} 步")
         child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+        for _h in _diff_handles:
+            _h.remove()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3216,6 +3224,8 @@ def paper_single_net_evolve(
     pre_finetune_save_path: Optional[str] = None,
     use_curriculum: bool = False,
     curriculum_hardseeds_path: str = "./logs/hard_seeds_curriculum.json",
+    diff_lr_scale: Optional[float] = None,
+    diff_lr_target: str = "cross",
 ):
     """
     論文 cheetah.ipynb 的完整流程：align_nodes → 平均 → replace_policy → learn()。
@@ -3278,7 +3288,7 @@ def paper_single_net_evolve(
         print(f"[Paper Single] 已儲存「PPO 訓練前」的純融合模型：{pre_finetune_save_path}")
 
     if final_finetune_steps > 0:
-        _rebuild_policy_optimizer(policy)
+        _diff_handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
         callbacks = []
         if env is not None:
             # 兩個 callback 必須共用同一個 dict：CurriculumCallback 複習期間會把
@@ -3310,6 +3320,8 @@ def paper_single_net_evolve(
             print("[Paper Single] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
         print(f"\n[Paper Single] 進入真實環境訓練，共 {final_finetune_steps} 步")
         child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+        for _h in _diff_handles:
+            _h.remove()
 
 
 @torch.no_grad()
@@ -3944,6 +3956,8 @@ def progressive_iterative_ot_evolve(
     alpha_init: float = 1.0,
     alpha_gamma: float = 0.7169,
     pre_finetune_save_path: Optional[str] = None,
+    diff_lr_scale: Optional[float] = None,
+    diff_lr_target: str = "cross",
 ):
     """
     漸進式 Iterative OT 融合：外層逐層(layer)，內層逐輪(round)。
@@ -4032,7 +4046,7 @@ def progressive_iterative_ot_evolve(
         print(f"[Progressive Iterative OT] 已儲存「PPO 微調前」的純 OT+蒸餾初始化模型：{pre_finetune_save_path}")
 
     if final_finetune_steps > 0:
-        _rebuild_policy_optimizer(policy)
+        _diff_handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
         auto_difficulty_callback = None
         if env is not None:
             auto_difficulty_callback = AutoDifficultyCallback(
@@ -4043,6 +4057,8 @@ def progressive_iterative_ot_evolve(
         print(f"\n[Progressive Iterative OT] 全部層蒸餾消化完成，開始最終真實環境微調，共 {final_finetune_steps} 步")
         callbacks = [auto_difficulty_callback] if auto_difficulty_callback is not None else []
         child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
+        for _h in _diff_handles:
+            _h.remove()
 
 
 def progressive_iterative_ot_evolve_focused(
@@ -4312,6 +4328,82 @@ def create_refined_differential_optimizer(
 
     print("所有權重矩陣的梯度掛鉤均已註冊。")
     return optimizer
+def make_differential_optimizer(
+    policy: nn.Module,
+    lr: float,
+    scale: float,
+    target: str = "cross",
+):
+    """
+    差異化學習率：用梯度掛鉤把「某一半區塊」的梯度乘上 scale，另一半維持原速。
+
+    target="cross"：縮放兩塊交叉通道 W[:oh,ih:] 與 W[oh:,:ih]
+                    → 限制融合帶進來的擾動幅度，讓純通道主導
+    target="pure" ：縮放兩塊純通道 W[:oh,:ih] 與 W[oh:,ih:]
+                    → 保護已校準的通路不被大幅改動，讓交叉通道快速適應
+
+    ⚠️ 跟舊的 create_refined_differential_optimizer 的關係：那支函式的名稱、docstring
+    與呼叫處註解都說它縮放「交叉通道」，但實際生效的兩行是 grad[:oh,:ih] 和
+    grad[oh:,ih:]——也就是純通道，縮放交叉通道的兩行被註解掉了。等同這裡的
+    target="pure"。這支新函式不去動它，以免改變 --evolved_all 既有的行為。
+
+    用梯度掛鉤而不是拆 param_group 有個好處：PPO 每輪會呼叫 _update_learning_rate()
+    覆寫 optimizer 的 lr，拆 param_group 的做法會被它洗掉，掛鉤不會。
+
+    回傳 (optimizer, hook_handles)，訓練結束後呼叫端應該把 handles 移除。
+    """
+    assert target in ("cross", "pure"), f"target 只能是 cross / pure，收到 {target!r}"
+    print(f"[差異化 lr] 基礎學習率 {lr}，縮放 {target} 區塊的梯度 ×{scale}")
+
+    optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
+    handles = []
+    for name, module in policy.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        W = module.weight
+        oh, ih = W.shape[0] // 2, W.shape[1] // 2
+        if oh == 0 or ih == 0:
+            continue
+
+        def make_hook(oh=oh, ih=ih, sf=scale, tgt=target):
+            def hook(grad):
+                with torch.no_grad():
+                    if tgt == "cross":
+                        grad[:oh, ih:].mul_(sf)
+                        grad[oh:, :ih].mul_(sf)
+                    else:
+                        grad[:oh, :ih].mul_(sf)
+                        grad[oh:, ih:].mul_(sf)
+                return grad
+            return hook
+
+        handles.append(W.register_hook(make_hook()))
+
+    print(f"[差異化 lr] 已在 {len(handles)} 個權重矩陣上註冊梯度掛鉤")
+    return optimizer, handles
+
+
+def _setup_finetune_optimizer(child_agent, diff_lr_scale=None, diff_lr_target="cross"):
+    """
+    最終 PPO 微調前建立 optimizer。diff_lr_scale 給 None 就是原本的行為
+    （_rebuild_policy_optimizer，全網同一個學習率）。回傳要在訓練後移除的 hook handles。
+    """
+    policy = child_agent.policy
+    if diff_lr_scale is None:
+        _rebuild_policy_optimizer(policy)
+        return []
+
+    lr = getattr(child_agent, "learning_rate", None)
+    if not isinstance(lr, float):
+        try:
+            lr = policy.optimizer.param_groups[0]["lr"]
+        except Exception:
+            lr = 3e-4
+    optimizer, handles = make_differential_optimizer(policy, lr, diff_lr_scale, diff_lr_target)
+    policy.optimizer = optimizer
+    return handles
+
+
 def freeze_pure_channels(
     policy: nn.Module,
     *,
@@ -5345,6 +5437,10 @@ if __name__ == "__main__":
                          help="ot_paper 對齊完直接覆寫交叉通道，不跟原值取 0.5 平均（預設是照論文取平均）")
     parser.add_argument("--ot_paper_col_dir", type=str, default="fixed", choices=["paper", "fixed"],
                          help="ot_paper_single 下一層欄位重排的方向：paper=完全照論文的 w[alignment_idx]（已驗證與原版逐位元相同，但那個方向是反的，融合結果會崩到 -110）, fixed=w[argsort(alignment_idx)]（修正版，融合結果 +282）。預設 fixed")
+    parser.add_argument("--diff_lr_scale", type=float, default=None,
+                         help="最終 PPO 微調時啟用差異化學習率：把 --diff_lr_target 指定那一半區塊的梯度乘上這個縮放因子，另一半維持原速。不給就是原本行為（全網同一個學習率）。--evolved_all 那條寫死用 0.2625")
+    parser.add_argument("--diff_lr_target", type=str, default="cross", choices=["cross", "pure"],
+                         help="--diff_lr_scale 要縮放哪一半：cross=縮放交叉通道（限制融合帶進來的擾動）, pure=縮放純通道（保護已校準的通路，讓交叉通道快速適應）。注意 --evolved_all 用的 create_refined_differential_optimizer 雖然名稱和註解都說是縮放交叉通道，實際生效的程式碼縮放的是純通道，等同這裡的 pure")
     parser.add_argument("--ot_paper_curriculum", action="store_true",
                          help="ot_paper_single 訓練時額外掛上 CurriculumCallback（hard-seed 複習機制）。預設不掛——現有所有融合實驗都只有 AutoDifficultyCallback，難度單向上升、收集到的 hard seed 只寫檔不回放，等於沒有複習。複習只會動 ./logs/hard_seeds_curriculum.json 這份副本，不會改到主池")
     parser.add_argument("--ot_paper_distill", action="store_true",
@@ -5976,6 +6072,8 @@ if __name__ == "__main__":
                         device=str(child_agent.device),
                         alpha_init=args.progressive_ot_alpha_init,
                         alpha_gamma=args.progressive_ot_gamma,
+                        diff_lr_scale=args.diff_lr_scale,
+                        diff_lr_target=args.diff_lr_target,
                     )
                 elif args.crossover == "ot_progressive_iter_focused":
                     # 跟 ot_progressive_iter 相同，但每輪蒸餾只聚焦剛 OT 對齊過的那一層
@@ -5997,6 +6095,8 @@ if __name__ == "__main__":
                         average=not args.ot_paper_no_average,
                         final_finetune_steps=args.progressive_steps_per_round,
                         device=str(child_agent.device),
+                        diff_lr_scale=args.diff_lr_scale,
+                        diff_lr_target=args.diff_lr_target,
                     )
                 elif args.crossover == "ot_paper_single":
                     # 論文真正的做法：塌縮成單一網路後直接訓練
@@ -6008,6 +6108,8 @@ if __name__ == "__main__":
                         device=str(child_agent.device),
                         final_finetune_steps=args.progressive_steps_per_round,
                         use_curriculum=args.ot_paper_curriculum,
+                        diff_lr_scale=args.diff_lr_scale,
+                        diff_lr_target=args.diff_lr_target,
                     )
                 elif args.crossover == "ties_progressive_iter":
                     # 跟 ot_progressive_iter 相同的漸進式逐層 + 逐輪迭代流程，只是對齊方式換成 TIES 合併
@@ -6020,6 +6122,8 @@ if __name__ == "__main__":
                         device=str(child_agent.device),
                         alpha_init=args.progressive_ties_alpha_init,
                         alpha_gamma=args.progressive_ties_gamma,
+                        diff_lr_scale=args.diff_lr_scale,
+                        diff_lr_target=args.diff_lr_target,
                     )
                 elif args.crossover in ("ot", "ot_recursive"):
                     print(f"[crossover={args.crossover}] 保留 OT 融合交叉通道，跳過離線蒸餾")
@@ -6293,6 +6397,8 @@ if __name__ == "__main__":
                 alpha_init=args.progressive_ot_alpha_init,
                 alpha_gamma=args.progressive_ot_gamma,
                 pre_finetune_save_path=_pre_finetune_out_path(args),
+                diff_lr_scale=args.diff_lr_scale,
+                diff_lr_target=args.diff_lr_target,
             )
         elif args.crossover == "ot_progressive_iter_focused":
             print(f"\n===== 漸進式逐層+逐輪迭代 OT（聚焦蒸餾版，每層 {args.progressive_n_rounds} 輪，"
@@ -6325,6 +6431,8 @@ if __name__ == "__main__":
                 final_finetune_steps=args.progressive_steps_per_round,
                 device=str(child_model.device),
                 pre_finetune_save_path=_pre_finetune_out_path(args),
+                diff_lr_scale=args.diff_lr_scale,
+                diff_lr_target=args.diff_lr_target,
             )
         elif args.crossover == "ot_paper_single":
             print(f"\n===== 論文式單一網路融合（col_dir={args.ot_paper_col_dir}，"
@@ -6340,6 +6448,8 @@ if __name__ == "__main__":
                 final_finetune_steps=args.progressive_steps_per_round,
                 pre_finetune_save_path=_pre_finetune_out_path(args),
                 use_curriculum=args.ot_paper_curriculum,
+                diff_lr_scale=args.diff_lr_scale,
+                diff_lr_target=args.diff_lr_target,
             )
         elif args.crossover == "ties_progressive_iter":
             print(f"\n===== 漸進式逐層+逐輪迭代 TIES（每層 {args.progressive_n_rounds} 輪，每輪蒸餾消化，"
@@ -6354,6 +6464,8 @@ if __name__ == "__main__":
                 alpha_init=args.progressive_ties_alpha_init,
                 alpha_gamma=args.progressive_ties_gamma,
                 pre_finetune_save_path=_pre_finetune_out_path(args),
+                diff_lr_scale=args.diff_lr_scale,
+                diff_lr_target=args.diff_lr_target,
             )
         elif args.crossover == "ot_first_distill_rest":
             if os.path.exists(args.distill_pt):
