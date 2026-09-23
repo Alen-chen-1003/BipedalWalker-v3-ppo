@@ -5437,6 +5437,10 @@ if __name__ == "__main__":
                          help="ot_paper 對齊完直接覆寫交叉通道，不跟原值取 0.5 平均（預設是照論文取平均）")
     parser.add_argument("--ot_paper_col_dir", type=str, default="fixed", choices=["paper", "fixed"],
                          help="ot_paper_single 下一層欄位重排的方向：paper=完全照論文的 w[alignment_idx]（已驗證與原版逐位元相同，但那個方向是反的，融合結果會崩到 -110）, fixed=w[argsort(alignment_idx)]（修正版，融合結果 +282）。預設 fixed")
+    parser.add_argument("--start_difficulty", type=float, default=0.0,
+                         help="--test_ties 的訓練/評估起始難度（預設 0.0，維持原本行為）。--evolved_all 那條寫死 0.5——實測從 0.5 起跳 + 10 萬步的設定，11 難度平均 270.3，遠勝從 0.0 起跳 + 100 萬步的 130~190。用來把那套訓練設定套到其他融合方法上做對照")
+    parser.add_argument("--distill_only_finetune_steps", type=int, default=0,
+                         help="distill_only 蒸餾完之後接多少步真實環境 PPO。預設 0＝維持原本行為（蒸餾完直接評估，不訓練），這樣既有的實驗數字仍可重現；設大於 0 才會補上這段，用來跟其他都接了 100 萬步 PPO 的融合方法做等量比較")
     parser.add_argument("--diff_lr_scale", type=float, default=None,
                          help="最終 PPO 微調時啟用差異化學習率：把 --diff_lr_target 指定那一半區塊的梯度乘上這個縮放因子，另一半維持原速。不給就是原本行為（全網同一個學習率）。--evolved_all 那條寫死用 0.2625")
     parser.add_argument("--diff_lr_target", type=str, default="cross", choices=["cross", "pure"],
@@ -5738,8 +5742,15 @@ if __name__ == "__main__":
         if len(names) < 2:
             raise ValueError("fitness_top.json 至少需要兩個模型")
         
-        mom_name, dad_name = random.sample(names, 2)
-        # mom_name, dad_name = "model2", "model3"
+        # --dad / --mom 有給就用指定的（做對照實驗時必須固定父母，否則每次隨機抽
+        # 不同的兩個模型，結果沒辦法互相比較）；沒給才維持原本的隨機抽樣行為。
+        if args.dad and args.mom:
+            dad_name = os.path.splitext(os.path.basename(args.dad))[0]
+            mom_name = os.path.splitext(os.path.basename(args.mom))[0]
+            print(f"[evolved_all] 使用指定的父母：dad={dad_name}, mom={mom_name}")
+        else:
+            mom_name, dad_name = random.sample(names, 2)
+            print(f"[evolved_all] 隨機抽樣父母：dad={dad_name}, mom={mom_name}")
         
         # resolve_path 函式保持不變
         def resolve_path(name: str, root: str) -> str:
@@ -5853,7 +5864,8 @@ if __name__ == "__main__":
         out_dir = Path("./models"); out_dir.mkdir(parents=True, exist_ok=True)
         dad_base = os.path.splitext(os.path.basename(dad_path))[0]
         mom_base = os.path.splitext(os.path.basename(mom_path))[0]
-        tag = f"child_{dad_base}_x_{mom_base}_fused" # 加上 fused 標籤以區分
+        # tag 必須帶上 crossover，否則不同交叉通道初始化方式會寫到同一個檔名互相覆蓋
+        tag = f"child_{dad_base}_x_{mom_base}_fused_{args.crossover}"
         zip_path = out_dir / f"{tag}.zip"
         evolved.save(str(zip_path))
         pkl_path = out_dir / f"{tag}_full.pkl"
@@ -6286,7 +6298,10 @@ if __name__ == "__main__":
             return model
 
         ENV_ID = "BipedalWalkerCustom-v0"
-        DIFF   = 0.0
+        # 訓練起始難度。預設 0.0 維持原本行為；--evolved_all 那條用的是 0.5，理由是
+        # 融合後的子代已經繼承雙親的基礎能力，從 0 開始等於花大量步數重練它本來就會的
+        # 簡單地形，而且難度要一路爬十幾級才到真正需要學的區間，過程中能力會漂移。
+        DIFF   = args.start_difficulty
         N_EVAL = args.ties_n_eval
 
         env = gym.make(ENV_ID, difficulty=DIFF, render_mode=None)
@@ -6497,6 +6512,22 @@ if __name__ == "__main__":
                 distill_crosstalk_baseline(
                     child_model, args.distill_pt, epochs=5, lr=0.008, device=child_model.device,
                 )
+                # 這條路徑原本蒸餾完就直接評估，沒有任何環境訓練——跟其他融合方法
+                # （都接了 100 萬步 PPO）不是等量比較。--distill_only_finetune_steps
+                # 預設 0 維持原本行為，給大於 0 的值才補上這一段，這樣表格裡既有的
+                # distill_only 數字仍然可以重現。
+                if args.distill_only_finetune_steps > 0:
+                    print(f"\n===== distill_only 接上真實環境訓練（{args.distill_only_finetune_steps} 步）=====")
+                    _diff_handles = _setup_finetune_optimizer(
+                        child_model, args.diff_lr_scale, args.diff_lr_target)
+                    auto_difficulty_callback = AutoDifficultyCallback(
+                        env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
+                        shared_flags=None, cooldown_steps=0, hardseed_save_path="./logs/hard_seeds.json",
+                    )
+                    child_model.learn(total_timesteps=args.distill_only_finetune_steps,
+                                      callback=[auto_difficulty_callback], progress_bar=True)
+                    for _h in _diff_handles:
+                        _h.remove()
             else:
                 print(f"\n[警告] 找不到蒸餾資料 {args.distill_pt}，跳過")
         elif os.path.exists(args.distill_pt):
