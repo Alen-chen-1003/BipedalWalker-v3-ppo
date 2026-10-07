@@ -3940,6 +3940,93 @@ def _pre_finetune_out_path(args) -> Optional[str]:
     return f"{base}_preppo{ext or '.pkl'}"
 
 
+def _fusable_branch(name: str) -> str:
+    """policy_net / value_net 是平行分支（共用 feature extractor 輸出），T 鏈只能在同一分支內傳遞。"""
+    for b in ("policy_net", "value_net"):
+        if b in name:
+            return b
+    return name
+
+
+@torch.no_grad()
+def _chain_refine_single_layer(
+    child_policy: nn.Module,
+    dad_policy: nn.Module,
+    mom_policy: nn.Module,
+    stage_idx: int,
+    T_prev: torch.Tensor,
+    ot_frac: float = 1.0,
+    alpha: float = 0.5,
+) -> Optional[str]:
+    """
+    鏈式（遞迴）版的單層對齊：用上一層傳下來的 T_prev（列＝dad 上一層神經元、欄＝mom
+    上一層神經元）翻譯這一層的「輸入欄位」，公式同 recursive_ot_fuse_single_layer 深層分支：
+        X_md 目標 = Wd_pure @ T_prev      （dad 自己的權重，欄位從 dad 神經元順序換成 mom 的）
+        X_dm 目標 = Wm_pure @ T_prev.T    （mom 自己的權重，欄位從 mom 神經元順序換成 dad 的）
+    再跟目前交叉通道值用 alpha 加權：新值 = (1-alpha)*目前值 + alpha*目標，只寫前 ot_frac 列。
+    T_prev 形狀對不上這層輸入半寬時回傳 None，由呼叫端退回 _iterative_refine_single_layer。
+    """
+    layer_names = _fusable_layer_names(child_policy)
+    if stage_idx >= len(layer_names):
+        return None
+    name = layer_names[stage_idx]
+    W = dict(child_policy.named_modules())[name].weight.data
+    oh, ih = W.shape[0] // 2, W.shape[1] // 2
+    if oh == 0 or ih == 0 or tuple(T_prev.shape) != (ih, ih):
+        return None
+    dev = W.device
+    Wd_pure = dict(dad_policy.named_modules())[name].weight.data[:oh, :ih].to(dev).float()
+    Wm_pure = dict(mom_policy.named_modules())[name].weight.data[oh:, ih:].to(dev).float()
+    T = T_prev.to(dev).float()
+
+    target_md = Wd_pure @ T
+    target_dm = Wm_pure @ T.t()
+    X_md_new = ((1 - alpha) * W[:oh, ih:].float() + alpha * target_md).to(W.dtype)
+    X_dm_new = ((1 - alpha) * W[oh:, :ih].float() + alpha * target_dm).to(W.dtype)
+
+    k = oh if ot_frac >= 1.0 else max(0, min(oh, int(round(oh * ot_frac))))
+    if k > 0:
+        W[:k, ih:] = X_md_new[:k]
+        W[oh:oh + k, :ih] = X_dm_new[:k]
+    return name
+
+
+@torch.no_grad()
+def _layer_transport_for_next(child_policy: nn.Module, mom_policy: nn.Module, stage_idx: int) -> Optional[torch.Tensor]:
+    """
+    這一層跑完所有輪之後，算出要交給下一層的 T（列＝dad 這層神經元、欄＝mom 這層神經元）。
+    用「蒸餾過的 X_md」跟 Wm_pure 比對：兩者都是乘在 mom 那半邊輸入上的權重，比較基礎一致，
+    而且 X_md 是訓練後的值，所以傳下去的 T 會反映這一層的訓練結果，不是每次都同一個固定排列。
+    """
+    layer_names = _fusable_layer_names(child_policy)
+    if stage_idx >= len(layer_names):
+        return None
+    name = layer_names[stage_idx]
+    W = dict(child_policy.named_modules())[name].weight.data
+    oh, ih = W.shape[0] // 2, W.shape[1] // 2
+    Wm_pure = dict(mom_policy.named_modules())[name].weight.data[oh:, ih:].to(W.device)
+    return _compute_layer_transport(W[:oh, ih:].clone(), Wm_pure)
+
+
+def _subsample_distill_blob(blob: dict, frac: float, seed: int = 0) -> dict:
+    """
+    從蒸餾資料隨機抽 frac 比例的樣本（固定 seed，同一個 frac 每次抽到同一批）。
+    完整資料 13GB，一輪蒸餾就要 ~9 分鐘，ot_progressive_iter 一次要跑 n_layers×n_rounds 輪；
+    抽樣之後每輪時間大致跟 frac 成正比，用在調參或快速實驗。frac>=1 直接回傳原資料。
+    """
+    if frac >= 1.0:
+        return blob
+    n = blob["states"].shape[0]
+    k = max(1, int(n * frac))
+    g = torch.Generator().manual_seed(seed)
+    idx = torch.randperm(n, generator=g)[:k]
+    out = dict(blob)
+    for key in ("states", "teacher_means", "teacher_logstds", "confidences", "teacher_values"):
+        out[key] = blob[key][idx].clone()
+    print(f"[蒸餾資料抽樣] {n} → {k} 筆（frac={frac}，seed={seed}）")
+    return out
+
+
 def progressive_iterative_ot_evolve(
     child_agent: "PPO",
     dad_policy: nn.Module,
@@ -3958,9 +4045,62 @@ def progressive_iterative_ot_evolve(
     pre_finetune_save_path: Optional[str] = None,
     diff_lr_scale: Optional[float] = None,
     diff_lr_target: str = "cross",
+    distill_frac: float = 1.0,
+    preloaded_blob: Optional[dict] = None,
+    distill_scope: str = "all",
+    chain_T: bool = False,
+    round_train: str = "distill",
+    round_ppo_steps: int = 100_000,
+    hardseed_path: str = "./logs/hard_seeds.json",
+    final_start_difficulty: Optional[float] = None,
+    round_auto_difficulty: bool = True,
+    round_difficulty: Optional[float] = None,
+    round_freeze_pure: bool = False,
+    ot_log_path: Optional[str] = None,
+    initial_distill: bool = False,
+    round_eval_fn=None,
 ):
     """
     漸進式 Iterative OT 融合：外層逐層(layer)，內層逐輪(round)。
+
+    round_train：每一輪 OT 之後用什麼消化擾動。"distill"（預設，原本行為）＝離線蒸餾；
+    "ppo"＝改成在真實環境用 PPO 訓練 round_ppo_steps 步（接 AutoDifficultyCallback，
+    難度從 env 目前的難度開始自動爬升），不讀蒸餾資料。全部輪跑完後一樣接
+    final_finetune_steps 步的最終微調。hardseed_path：AutoDifficultyCallback 讀寫的
+    hard seed 檔（預設主池），實驗時可以傳副本避免汙染主池。
+    final_start_difficulty：給了的話，最終微調開始前把環境難度重設成這個值（例如各輪從 0
+    爬上來，最終微調改從 0.5 起跳）；None＝維持各輪爬到的難度（原本行為）。
+    round_auto_difficulty / round_difficulty：只影響 round_train="ppo" 的「每一輪」訓練。
+    round_auto_difficulty=False 時各輪不接 AutoDifficultyCallback；round_difficulty 給了的話，
+    每一輪開始前把難度設成這個值（例如固定 0.0）。最終微調不受這兩個參數影響。
+    round_freeze_pure：round_train="ppo" 時，各輪 PPO 只訓練交叉通道（凍結 dad/mom 純通道，
+    同蒸餾的 freeze_pure_channels），但放開 value 輸出層讓 critic 能學；log_std 維持凍結。
+    最終微調一律訓練整個網路。
+    ot_log_path：給了的話，每一輪訓練完記錄這一層「下一輪 OT 會用到的配對 T」：跟上一輪相比
+    換了配對的神經元比例（perm_changed），以及對齊誤差 ||X_md − T·Wm_pure|| / ||X_md||
+    （align_err，越小代表交叉通道跟對方純通道對得越好），存成 JSON，用來看 OT 是否逐輪收斂。
+    initial_distill：進入各層各輪之前，先做一次跟 distill_only 相同的蒸餾（交叉通道歸零後
+    蒸餾 distill_epochs 個 epoch），讓模型先會走路，再開始「OT → 擾動」的迴圈。
+    round_eval_fn：給了的話，呼叫 round_eval_fn(child_agent) 取得一個分數（例如固定地形的
+    平均 reward），在「起點」、每一輪「OT 寫入後」與「訓練後」各記一次，寫進 ot_log。
+
+    ⚠️ 下方原本的說明寫「round 1 用 recursive_ot_fuse_single_layer」，但程式碼從第一個
+    commit 起每一輪（含 round 1）都是 _iterative_refine_single_layer，沒有遞迴；
+    想要鏈式／遞迴行為請開 chain_T。
+
+    distill_scope：每輪蒸餾的範圍。"all"（預設，原本行為）＝全部層的交叉通道一起訓練；
+    "layer"＝只訓練剛 OT 過的這一層，其餘 fusable 層與 action_net 的交叉通道全部凍結，
+    避免蒸餾把其他層（包括前面已經對齊好的層）一起拉走。
+
+    chain_T：預設 False（原本行為，每層各自獨立做列對列 OT）。True 時上一層的 T 會影響
+    下一層：每層跑完最後一輪，用蒸餾過的交叉通道算出這層的神經元配對 T，交給下一層用
+    _chain_refine_single_layer 翻譯輸入欄位；每個分支（policy_net / value_net）的第一層
+    沒有上一層，仍用 _iterative_refine_single_layer，跨分支時 T 重置。alpha 加權與
+    指數衰減兩種模式都一樣適用。
+
+    distill_frac：每輪蒸餾只用這個比例的蒸餾資料（_subsample_distill_blob，固定 seed），
+    預設 1.0＝全部資料（原本行為）。preloaded_blob：呼叫端已經讀好的蒸餾資料，
+    給了就不再從 distill_pt 讀（調參時每個 trial 共用同一份，省掉每次讀 13GB）。
 
     pre_finetune_save_path：給了路徑的話，在最終 PPO 微調「開始之前」先把 policy 存一份，
     留下純 OT+蒸餾初始化的結果，方便跟微調後的版本對照（分離「初始化品質」與「PPO 修復
@@ -4013,24 +4153,143 @@ def progressive_iterative_ot_evolve(
           f"每層 {n_rounds} 輪，每輪用蒸餾（凍結純通道，{distill_epochs} epoch）消化 OT 擾動")
 
     # 蒸餾資料只需要讀一次，之後每輪都重複使用，避免同一份檔案被反覆從硬碟讀取
-    distill_blob = torch.load(distill_pt, map_location="cpu")
+    assert round_train in ("distill", "ppo"), round_train
+    distill_blob = None
+    if round_train == "distill" or initial_distill:
+        distill_blob = preloaded_blob if preloaded_blob is not None else torch.load(distill_pt, map_location="cpu")
+        distill_blob = _subsample_distill_blob(distill_blob, distill_frac)
+
+    def _set_difficulty(d):
+        env.unwrapped.difficulty = float(d)
+        if getattr(child_agent, "env", None) is not None:
+            child_agent.env.env_method("set_difficulty", float(d))
+
+    def _env_train(steps, tag, auto=True, freeze_pure=False):
+        """在真實環境用 PPO 訓練 steps 步（跟最終微調同一套 optimizer）；auto=True 時接難度爬升；
+        freeze_pure=True 時只訓練交叉通道（+ value 輸出層）。"""
+        if freeze_pure:
+            _, handles = freeze_pure_channels(policy, bias_mode="freeze", allow_train_if_unsplit=False)
+            vn = getattr(policy, "value_net", None)
+            if isinstance(vn, nn.Linear):
+                for prm in vn.parameters():
+                    prm.requires_grad = True
+            _rebuild_policy_optimizer(policy)
+        else:
+            handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
+        callbacks = []
+        if env is not None and auto:
+            callbacks.append(AutoDifficultyCallback(
+                env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
+                shared_flags=None, cooldown_steps=0, hardseed_save_path=hardseed_path,
+            ))
+        cur = getattr(getattr(env, "unwrapped", env), "difficulty", None) if env is not None else None
+        print(f"[Progressive Iterative OT] {tag}：真實環境 PPO {steps} 步（目前難度 {cur}，"
+              f"{'難度自動爬升' if auto and env is not None else '難度固定'}）")
+        child_agent.learn(total_timesteps=steps, callback=callbacks, progress_bar=True)
+        for _h in handles:
+            _h.remove()
+        if freeze_pure:
+            for prm in policy.parameters():
+                prm.requires_grad = True
+
+    ot_log = []
+    prev_perm = {}
+
+    @torch.no_grad()
+    def _log_T(stage, round_idx, alpha_t, how):
+        if not ot_log_path:
+            return
+        name = layer_names[stage]
+        W = dict(policy.named_modules())[name].weight.data
+        oh, ih = W.shape[0] // 2, W.shape[1] // 2
+        Wm_pure = dict(mom_policy.named_modules())[name].weight.data[oh:, ih:].to(W.device).float()
+        X = W[:oh, ih:].float()
+        T = _compute_layer_transport(X, Wm_pure)
+        perm = T.argmax(dim=1).cpu()
+        err = ((X - T @ Wm_pure).norm() / X.norm().clamp(min=1e-12)).item()
+        changed = None if stage not in prev_perm else (perm != prev_perm[stage]).float().mean().item()
+        prev_perm[stage] = perm
+        ot_log.append({"stage": stage, "layer": name, "round": round_idx + 1, "alpha": alpha_t, "how": how,
+                       "perm_changed": changed, "align_err": err})
+        print(f"[OT log] {name} round {round_idx + 1}: 配對變動 "
+              f"{'—' if changed is None else f'{changed * 100:.1f}%'}，對齊誤差 {err:.4f}")
+        os.makedirs(os.path.dirname(ot_log_path) or ".", exist_ok=True)
+        with open(ot_log_path, "w", encoding="utf-8") as f:
+            json.dump(ot_log, f, ensure_ascii=False, indent=1)
+
+    assert distill_scope in ("all", "layer"), distill_scope
+    print(f"[Progressive Iterative OT] distill_scope={distill_scope}，chain_T={chain_T}")
+    T_prev = None
+    prev_branch = None
+
+    def _eval_log(event, **extra):
+        if round_eval_fn is None:
+            return None
+        sc = float(round_eval_fn(child_agent))
+        ot_log.append({"event": event, "score": sc, **extra})
+        print(f"[OT log] {event} {extra if extra else ''}：走路分數 {sc:.1f}")
+        if ot_log_path:
+            os.makedirs(os.path.dirname(ot_log_path) or ".", exist_ok=True)
+            with open(ot_log_path, "w", encoding="utf-8") as f:
+                json.dump(ot_log, f, ensure_ascii=False, indent=1)
+        return sc
+
+    _eval_log("start_raw_concat")
+    if initial_distill:
+        print(f"\n[Progressive Iterative OT] 起點：先蒸餾一次（交叉通道歸零後 {distill_epochs} epoch，lr {distill_lr}）")
+        distill_crosstalk_baseline(
+            child_agent, distill_pt, epochs=distill_epochs, lr=distill_lr,
+            device=device, zero_init=True, preloaded_blob=distill_blob,
+        )
+        _eval_log("start_after_distill")
 
     for stage in range(n_stages_to_run):
+        branch = _fusable_branch(layer_names[stage])
+        if branch != prev_branch:
+            T_prev = None  # 分支的第一層沒有上一層可用
+        prev_branch = branch
+
+        # "layer"：除了這一層以外，其他 fusable 層和 action_net 的交叉通道都凍結
+        exclude = None
+        if distill_scope == "layer":
+            exclude = [n for n in layer_names if n != layer_names[stage]] + ["action_net"]
+
         for round_idx in range(n_rounds):
             alpha_t = alpha_init * (alpha_gamma ** round_idx)
-            fused_name = _iterative_refine_single_layer(policy, dad_policy, mom_policy, stage, ot_frac=ot_frac, alpha=alpha_t)
+            fused_name = None
+            how = "列對列"
+            if chain_T and T_prev is not None:
+                fused_name = _chain_refine_single_layer(policy, dad_policy, mom_policy, stage, T_prev, ot_frac=ot_frac, alpha=alpha_t)
+                how = "鏈式(沿用上一層 T)"
+            if fused_name is None:
+                fused_name = _iterative_refine_single_layer(policy, dad_policy, mom_policy, stage, ot_frac=ot_frac, alpha=alpha_t)
+                how = "列對列"
 
             if fused_name is None:
                 print(f"[Progressive Iterative OT] stage {stage+1} 找不到對應層，跳過")
                 break
 
             print(f"\n[Progressive Iterative OT] stage {stage+1}/{n_stages_to_run} 層 {fused_name}  "
-                  f"round {round_idx+1}/{n_rounds}（alpha={alpha_t:.4f}）：OT 對齊完成（含初始交叉通道值），用蒸餾消化這次擾動")
+                  f"round {round_idx+1}/{n_rounds}（alpha={alpha_t:.4f}，{how}）：OT 對齊完成，"
+                  f"用{'蒸餾' if round_train == 'distill' else '真實環境 PPO'}消化這次擾動")
 
-            distill_crosstalk_baseline(
-                child_agent, distill_pt, epochs=distill_epochs, lr=distill_lr,
-                device=device, zero_init=False, preloaded_blob=distill_blob,
-            )
+            _eval_log("after_ot", layer=layer_names[stage], round=round_idx + 1, alpha=alpha_t)
+            if round_train == "ppo":
+                if round_difficulty is not None and env is not None:
+                    _set_difficulty(round_difficulty)
+                _env_train(round_ppo_steps, f"stage {stage+1} round {round_idx+1}", auto=round_auto_difficulty,
+                           freeze_pure=round_freeze_pure)
+            else:
+                distill_crosstalk_baseline(
+                    child_agent, distill_pt, epochs=distill_epochs, lr=distill_lr,
+                    device=device, zero_init=False, preloaded_blob=distill_blob,
+                    exclude_layers=exclude,
+                )
+            _log_T(stage, round_idx, alpha_t, how)
+            _eval_log("after_train", layer=layer_names[stage], round=round_idx + 1, alpha=alpha_t)
+
+        if chain_T:
+            T_prev = _layer_transport_for_next(policy, mom_policy, stage)
 
     if n_stages_to_run < n_layers:
         remaining = layer_names[n_stages_to_run:]
@@ -4046,19 +4305,11 @@ def progressive_iterative_ot_evolve(
         print(f"[Progressive Iterative OT] 已儲存「PPO 微調前」的純 OT+蒸餾初始化模型：{pre_finetune_save_path}")
 
     if final_finetune_steps > 0:
-        _diff_handles = _setup_finetune_optimizer(child_agent, diff_lr_scale, diff_lr_target)
-        auto_difficulty_callback = None
-        if env is not None:
-            auto_difficulty_callback = AutoDifficultyCallback(
-                env, None, eval_freq=10_000, reward_threshold=250, increase=0.05, verbose=1,
-                shared_flags=None, cooldown_steps=0, hardseed_save_path="./logs/hard_seeds.json",
-            )
-            print("[Progressive Iterative OT] 已接上 AutoDifficultyCallback（難度自動升級 + hard_seeds 難度池）")
-        print(f"\n[Progressive Iterative OT] 全部層蒸餾消化完成，開始最終真實環境微調，共 {final_finetune_steps} 步")
-        callbacks = [auto_difficulty_callback] if auto_difficulty_callback is not None else []
-        child_agent.learn(total_timesteps=final_finetune_steps, callback=callbacks, progress_bar=True)
-        for _h in _diff_handles:
-            _h.remove()
+        if final_start_difficulty is not None and env is not None:
+            _set_difficulty(final_start_difficulty)
+            print(f"[Progressive Iterative OT] 最終微調前把難度重設為 {final_start_difficulty}")
+        print(f"\n[Progressive Iterative OT] 全部層、全部輪完成，開始最終真實環境微調，共 {final_finetune_steps} 步")
+        _env_train(final_finetune_steps, "最終微調")
 
 
 def progressive_iterative_ot_evolve_focused(
@@ -5383,6 +5634,234 @@ def run_action_analysis():
     
     env.close()
     print("\n分析完成！所有圖表已儲存至:", save_dir)
+# ═══════════════════════════════════════════════════════════════════════════
+# 父母全組合掃描（--pair_sweep）：parent 資料夾裡所有模型兩兩配對，用 inter_ot 融合，
+# 再跟各自的父母在同一批地形上逐局比較。
+# ═══════════════════════════════════════════════════════════════════════════
+# inter_ot = ot_progressive_iter v2 調參 trial #18 的參數（保留地形驗證第 1 名）
+INTER_OT_PARAMS = dict(
+    n_rounds=4, alpha_init=0.37113711656191894, alpha_end=0.03483710750778961,
+    distill_epochs=7, distill_lr=0.007418644882413461, ot_frac=0.6118102786919558,
+)
+PAIR_SWEEP_DIFFS = [round(x * 0.1, 1) for x in range(11)]
+
+
+def _pair_sweep_fixed_seeds(base_seed: int, difficulty: float, n: int):
+    """同 eval_per_difficulty.fixed_seeds：同一個 base_seed + 難度 → 永遠同一組地形。"""
+    rng = random.Random(base_seed * 1000 + int(round(difficulty * 10)))
+    return [rng.randint(0, 2**31 - 1) for _ in range(n)]
+
+
+def _pair_sweep_load_policy_model(path: str, env):
+    """.pkl＝cloudpickle 存的 policy（或整個 PPO），其餘當 SB3 zip。"""
+    if path.endswith(".pkl"):
+        with open(path, "rb") as f:
+            obj = cloudpickle.load(f)
+        model = PPO("MlpPolicy", env, verbose=0)
+        model.policy = (obj.policy if isinstance(obj, PPO) else obj).to(model.device)
+        return model
+    return PPO.load(path[:-4] if path.endswith(".zip") else path, env=env, device="cpu")
+
+
+def _pair_sweep_eval_worker(job):
+    """在獨立行程評估一個模型：每個難度 n_eps 局，地形由 eval_seed 決定（deterministic 動作）。"""
+    name, path, eval_seed, n_eps = job
+    torch.set_num_threads(1)
+    env = gym.make("BipedalWalkerCustom-v0", difficulty=0.0)
+    model = _pair_sweep_load_policy_model(path, env)
+    out = {}
+    for d in PAIR_SWEEP_DIFFS:
+        rewards = []
+        for seed in _pair_sweep_fixed_seeds(eval_seed, d, n_eps):
+            e = gym.make("BipedalWalkerCustom-v0", difficulty=d)
+            obs = e.reset(seed=seed)
+            obs = obs[0] if isinstance(obs, tuple) else obs
+            done, total = False, 0.0
+            while not done:
+                action, _ = model.predict(obs, deterministic=True)
+                step = e.step(action)
+                if len(step) == 5:
+                    obs, r, term, trunc, _ = step
+                    done = term or trunc
+                else:
+                    obs, r, done, _ = step
+                total += r
+            rewards.append(float(total))
+            e.close()
+        out[str(d)] = rewards
+    return name, out
+
+
+class _NullPool:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def pair_sweep_inter_ot(
+    parent_dir: str = "./best_model/p_models",
+    out_dir: str = "./logs/pair_sweep_inter_ot",
+    distill_pt: str = "./logs/ga_eval/mtkd_continuous.pt(2)",
+    distill_frac: float = 0.05,
+    include_reverse: bool = True,
+    params: Optional[dict] = None,
+    train_seed: int = 0,
+    eval_seed: int = 2026,
+    eval_episodes: int = 100,
+    workers: int = 8,
+    shard_index: int = 0,
+    num_shards: int = 1,
+    summarize_only: bool = False,
+):
+    """
+    parent_dir 裡的所有模型兩兩配對（include_reverse=True 時 A×B 與 B×A 都做，dad 放上半、
+    mom 放下半），每一對用 inter_ot（progressive_iterative_ot_evolve + INTER_OT_PARAMS，
+    蒸餾資料 distill_pt 抽 distill_frac）融合出子代。每對訓練前固定 train_seed，結果可重現。
+
+    評估跟訓練重疊進行：所有父母一開始就丟進評估行程池，每訓練完一個子代就把它丟進去；
+    每個模型跑 11 難度 × eval_episodes 局（eval_seed 決定的地形，所有模型同一批），
+    每局 reward 存 out_dir/episodes.json。中斷後重跑會跳過已訓練的子代與已評估的模型。
+
+    輸出：out_dir/child_<dad>_x_<mom>.pkl、episodes.json、summary.json（每對子代 vs 較強父母
+    的逐局配對差距與 95% 信賴區間）、position_effect.json（A×B 對 B×A）。
+
+    平行加速：num_shards>1 時這個行程只負責 pairs[shard_index::num_shards]，評估結果寫到
+    episodes_shard<i>.json（父母只由 shard 0 評估），同時開多個行程各跑一個 shard；
+    全部跑完後用 summarize_only=True 把所有 episodes*.json 合併並產生摘要。
+    """
+    import itertools
+    from multiprocessing import Pool
+
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    p = dict(INTER_OT_PARAMS if params is None else params)
+    gamma = 1.0 if p["n_rounds"] <= 1 or p["alpha_init"] <= 0 else \
+        (min(p["alpha_end"], p["alpha_init"]) / p["alpha_init"]) ** (1.0 / (p["n_rounds"] - 1))
+    os.makedirs(out_dir, exist_ok=True)
+
+    parents = sorted(f[:-4] for f in os.listdir(parent_dir) if f.endswith(".zip"))
+    pairs = list(itertools.permutations(parents, 2) if include_reverse else itertools.combinations(parents, 2))
+    child_path = lambda d, m: os.path.join(out_dir, f"child_{d}_x_{m}.pkl")
+    json.dump({"parents": parents, "pairs": pairs, "params": p, "gamma": gamma, "distill_pt": distill_pt,
+               "distill_frac": distill_frac, "train_seed": train_seed, "eval_seed": eval_seed,
+               "eval_episodes": eval_episodes},
+              open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(f"[Pair sweep] {len(parents)} 個父母、{len(pairs)} 組配對；參數 {p}，gamma={gamma:.4f}")
+
+    sharded = num_shards > 1
+    ep_path = os.path.join(out_dir, f"episodes_shard{shard_index}.json" if sharded else "episodes.json")
+    episodes = json.load(open(ep_path)) if os.path.exists(ep_path) else {}
+    pending = []
+    if summarize_only:
+        import glob
+        for f in sorted(glob.glob(os.path.join(out_dir, "episodes*.json"))):
+            episodes.update(json.load(open(f)))
+        missing = [n for n in parents + [f"child_{d}_x_{m}" for d, m in pairs] if n not in episodes]
+        if missing:
+            print(f"[Pair sweep] 還有 {len(missing)} 個模型沒評估完，例如 {missing[:5]}；先不產生摘要")
+            return
+        json.dump(episodes, open(os.path.join(out_dir, "episodes.json"), "w"))
+
+    def _submit(pool, name, path):
+        if name not in episodes and not any(n == name for n, _ in pending):
+            pending.append((name, pool.apply_async(_pair_sweep_eval_worker, ((name, path, eval_seed, eval_episodes),))))
+
+    def _collect(block=False):
+        for item in list(pending):
+            name, res = item
+            if block or res.ready():
+                n, out = res.get()
+                episodes[n] = out
+                pending.remove(item)
+                json.dump(episodes, open(ep_path, "w"))
+                print(f"[Pair sweep] 評估完成 {n}：{np.mean([np.mean(v) for v in out.values()]):.1f}", flush=True)
+
+    my_pairs = pairs[shard_index::num_shards] if sharded else pairs
+    if sharded and not summarize_only:
+        print(f"[Pair sweep] shard {shard_index}/{num_shards}：負責 {len(my_pairs)} 組配對")
+    with (Pool(workers) if not summarize_only else _NullPool()) as pool:
+        if summarize_only:
+            pass
+        elif shard_index == 0:
+            for par in parents:
+                _submit(pool, par, os.path.join(parent_dir, par + ".zip"))
+
+        todo = [] if summarize_only else [(d, m) for d, m in my_pairs if not os.path.exists(child_path(d, m))]
+        for d, m in ([] if summarize_only else my_pairs):
+            if (d, m) not in todo:
+                _submit(pool, f"child_{d}_x_{m}", child_path(d, m))
+        if todo:
+            print(f"[Pair sweep] 還要訓練 {len(todo)} 個子代；讀取蒸餾資料 {distill_pt}", flush=True)
+            full = torch.load(distill_pt, map_location="cpu")
+            blob = _subsample_distill_blob(full, distill_frac)
+            del full
+            env = gym.make("BipedalWalkerCustom-v0", difficulty=0.0)
+            for i, (d, m) in enumerate(todo, 1):
+                t0 = time.time()
+                print(f"\n[Pair sweep] ===== [{i}/{len(todo)}] dad={d}  mom={m} =====", flush=True)
+                random.seed(train_seed); np.random.seed(train_seed)
+                torch.manual_seed(train_seed); torch.cuda.manual_seed_all(train_seed)
+                dad = _pair_sweep_load_policy_model(os.path.join(parent_dir, d + ".zip"), env)
+                mom = _pair_sweep_load_policy_model(os.path.join(parent_dir, m + ".zip"), env)
+                child = PPO("MlpPolicy", env, verbose=0)
+                child.policy = create_dual_channel_policy(dad.policy, mom.policy).to(child.device)
+                child.policy.optimizer = torch.optim.Adam(child.policy.parameters(), lr=1e-4)
+                progressive_iterative_ot_evolve(
+                    child, dad.policy, mom.policy, distill_pt, env=env,
+                    n_rounds=p["n_rounds"], distill_epochs=p["distill_epochs"], distill_lr=p["distill_lr"],
+                    final_finetune_steps=0, ot_frac=p["ot_frac"], device=str(child.device),
+                    alpha_init=p["alpha_init"], alpha_gamma=gamma, pre_finetune_save_path=None,
+                    preloaded_blob=blob,
+                )
+                with open(child_path(d, m), "wb") as f:
+                    cloudpickle.dump(child.policy, f)
+                print(f"[Pair sweep] ✅ {child_path(d, m)}（{time.time() - t0:.0f} 秒）", flush=True)
+                _submit(pool, f"child_{d}_x_{m}", child_path(d, m))
+                _collect()
+        _collect(block=True)
+
+    if sharded and not summarize_only:
+        print(f"[Pair sweep] shard {shard_index} 完成；全部 shard 都完成後，用 --pair_sweep_summarize 合併結果")
+        return
+
+    # ── 摘要 ─────────────────────────────────────────────────────────
+    avg = lambda n: float(np.mean([np.mean(episodes[n][str(x)]) for x in PAIR_SWEEP_DIFFS]))
+
+    def paired(a, b):
+        x = np.concatenate([np.array(episodes[a][str(t)]) - np.array(episodes[b][str(t)]) for t in PAIR_SWEEP_DIFFS])
+        se = x.std(ddof=1) / np.sqrt(len(x))
+        return float(x.mean()), float(x.mean() - 1.96 * se), float(x.mean() + 1.96 * se)
+
+    rows = []
+    print("\n[Pair sweep] ===== 子代 vs 父母（11 難度 × %d 局，同一批地形）=====" % eval_episodes)
+    for d, m in pairs:
+        c = f"child_{d}_x_{m}"
+        best = d if avg(d) >= avg(m) else m
+        mean, lo, hi = paired(c, best)
+        rows.append({"dad": d, "mom": m, "child": avg(c), "dad_score": avg(d), "mom_score": avg(m),
+                     "better_parent": best, "vs_better_parent": mean, "ci_low": lo, "ci_high": hi,
+                     "per_difficulty": {str(t): float(np.mean(episodes[c][str(t)])) for t in PAIR_SWEEP_DIFFS}})
+        tag = "顯著贏" if lo > 0 else "顯著輸" if hi < 0 else "不顯著"
+        print(f"  {d:8s} × {m:8s}  子代 {avg(c):6.1f} | dad {avg(d):6.1f}  mom {avg(m):6.1f} | "
+              f"子代 − 較強父母 {mean:+6.1f} [{lo:+.1f}, {hi:+.1f}] {tag}")
+    json.dump(rows, open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(f"\n[Pair sweep] 顯著贏過較強父母 {sum(r['ci_low'] > 0 for r in rows)}/{len(rows)}，"
+          f"顯著輸 {sum(r['ci_high'] < 0 for r in rows)}/{len(rows)}，"
+          f"平均差 {np.mean([r['vs_better_parent'] for r in rows]):+.1f}")
+
+    if include_reverse:
+        pos = []
+        for a, b in itertools.combinations(parents, 2):
+            mean, lo, hi = paired(f"child_{a}_x_{b}", f"child_{b}_x_{a}")
+            pos.append({"A": a, "B": b, "AxB": avg(f"child_{a}_x_{b}"), "BxA": avg(f"child_{b}_x_{a}"),
+                        "diff": mean, "ci_low": lo, "ci_high": hi})
+        json.dump(pos, open(os.path.join(out_dir, "position_effect.json"), "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+        print(f"[Pair sweep] 上下半位置互換有顯著差異的組數：{sum(r['ci_low'] > 0 or r['ci_high'] < 0 for r in pos)}/{len(pos)}")
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
@@ -5402,6 +5881,20 @@ if __name__ == "__main__":
     parser.add_argument("--ga", action="store_true")
     parser.add_argument("--test_all_generations", action="store_true")
     parser.add_argument("--test_ties", action="store_true")
+    parser.add_argument("--pair_sweep", action="store_true",
+                        help="父母全組合掃描：--pair_sweep_parent_dir 裡所有模型兩兩配對，用 inter_ot（v2 #18 參數）融合，"
+                             "再跟各自的父母在 seed 2026 的同一批地形上逐局比較")
+    parser.add_argument("--pair_sweep_parent_dir", type=str, default="./best_model/p_models")
+    parser.add_argument("--pair_sweep_out", type=str, default="./logs/pair_sweep_inter_ot")
+    parser.add_argument("--pair_sweep_no_reverse", action="store_true",
+                        help="只做 A×B，不做 B×A（預設兩個方向都做，因為 dad 放上半、mom 放下半，互換是不同的子代）")
+    parser.add_argument("--pair_sweep_workers", type=int, default=8, help="平行評估的行程數")
+    parser.add_argument("--pair_sweep_eval_episodes", type=int, default=100, help="每個難度評幾局")
+    parser.add_argument("--pair_sweep_shard", type=str, default="0/1",
+                        help="平行加速用：i/n＝這個行程只負責第 i 份（共 n 份）配對，例如同時開 0/4、1/4、2/4、3/4")
+    parser.add_argument("--pair_sweep_summarize", action="store_true",
+                        help="所有 shard 跑完後，合併各 shard 的評估結果並產生摘要")
+    parser.add_argument("--pair_sweep_distill_frac", type=float, default=0.05, help="蒸餾資料抽樣比例（預設 0.05，同 inter_ot）")
     parser.add_argument("--dad",  type=str, default=None, help="dad 模型路徑 (.zip/.pkl)")
     parser.add_argument("--mom",  type=str, default=None, help="mom 模型路徑 (.zip/.pkl)")
     parser.add_argument("--ties_k", type=float, default=0.2, help="TIES top-k 比例（預設 0.2）")
@@ -5423,6 +5916,20 @@ if __name__ == "__main__":
                          help="ot_progressive_iter(_focused) / ties_progressive_iter 全部層蒸餾消化完之後，最終真實環境微調的步數（預設 100 萬步）")
     parser.add_argument("--progressive_pre_finetune_out", type=str, default=None,
                          help="ot_progressive_iter(_focused) / ties_progressive_iter 在最終 PPO 微調『開始之前』額外存一份純融合+蒸餾初始化模型的路徑；不給則自動用 <ties_out 去掉副檔名>_preppo.pkl。設成空字串可停用")
+    parser.add_argument("--progressive_distill_epochs", type=int, default=5,
+                         help="ot_progressive_iter(_focused) 每輪 OT 之後蒸餾消化的 epoch 數（預設 5，維持原本寫死的值）")
+    parser.add_argument("--progressive_distill_lr", type=float, default=0.008,
+                         help="ot_progressive_iter(_focused) 每輪蒸餾消化的學習率（預設 0.008，維持原本寫死的值）")
+    parser.add_argument("--progressive_distill_frac", type=float, default=1.0,
+                         help="ot_progressive_iter 每輪蒸餾只用多少比例的蒸餾資料（固定 seed 抽樣；預設 1.0＝全部。完整資料一輪約 9 分鐘，0.05 約快 20 倍）。用 tune_ot_progressive_iter.py 調出來的參數要搭配同樣的 frac 才會重現")
+    parser.add_argument("--progressive_distill_scope", type=str, default="all", choices=["all", "layer"],
+                         help="ot_progressive_iter 每輪蒸餾範圍：all=全部層交叉通道一起訓練（預設，原本行為）；layer=只訓練剛 OT 過的這一層，其他層和 action_net 凍結")
+    parser.add_argument("--progressive_round_train", type=str, default="distill", choices=["distill", "ppo"],
+                         help="ot_progressive_iter 每一輪 OT 之後怎麼消化擾動：distill=離線蒸餾（預設，原本行為）；ppo=在真實環境用 PPO 訓練 --progressive_round_ppo_steps 步")
+    parser.add_argument("--progressive_round_ppo_steps", type=int, default=100_000,
+                         help="--progressive_round_train ppo 時，每一輪的 PPO 步數（預設 10 萬）")
+    parser.add_argument("--progressive_chain_T", action="store_true",
+                         help="ot_progressive_iter 上一層的 T 會影響下一層（鏈式／遞迴 OT）：每層跑完後用蒸餾過的交叉通道算 T 傳給下一層翻譯輸入欄位。預設不開＝每層獨立列對列 OT（原本行為）")
     parser.add_argument("--progressive_ot_alpha_init", type=float, default=1.0,
                          help="ot_progressive_iter(_focused) 每個 stage 第一輪(round_idx=0)的 OT 介入強度 alpha（預設 1.0＝第一輪完整套用 OT，大力對齊）")
     parser.add_argument("--progressive_ot_gamma", type=float, default=0.7169,
@@ -6080,6 +6587,13 @@ if __name__ == "__main__":
                         child_agent, dad.policy, mom.policy, DISTILL_PT,
                         env=env,
                         n_rounds=args.progressive_n_rounds,
+                        distill_epochs=args.progressive_distill_epochs,
+                        distill_lr=args.progressive_distill_lr,
+                        distill_frac=args.progressive_distill_frac,
+                        distill_scope=args.progressive_distill_scope,
+                        chain_T=args.progressive_chain_T,
+                        round_train=args.progressive_round_train,
+                        round_ppo_steps=args.progressive_round_ppo_steps,
                         final_finetune_steps=args.progressive_steps_per_round,
                         device=str(child_agent.device),
                         alpha_init=args.progressive_ot_alpha_init,
@@ -6093,6 +6607,8 @@ if __name__ == "__main__":
                         child_agent, dad.policy, mom.policy, DISTILL_PT,
                         env=env,
                         n_rounds=args.progressive_n_rounds,
+                        distill_epochs=args.progressive_distill_epochs,
+                        distill_lr=args.progressive_distill_lr,
                         final_finetune_steps=args.progressive_steps_per_round,
                         device=str(child_agent.device),
                         alpha_init=args.progressive_ot_alpha_init,
@@ -6405,6 +6921,13 @@ if __name__ == "__main__":
             progressive_iterative_ot_evolve(
                 child_model, dad.policy, mom.policy, args.distill_pt, env=env,
                 n_rounds=args.progressive_n_rounds,
+                distill_epochs=args.progressive_distill_epochs,
+                distill_lr=args.progressive_distill_lr,
+                distill_frac=args.progressive_distill_frac,
+                distill_scope=args.progressive_distill_scope,
+                chain_T=args.progressive_chain_T,
+                round_train=args.progressive_round_train,
+                round_ppo_steps=args.progressive_round_ppo_steps,
                 final_finetune_steps=args.progressive_steps_per_round,
                 max_stages=args.progressive_max_stages,
                 ot_frac=args.ot_frac,
@@ -6421,6 +6944,8 @@ if __name__ == "__main__":
             progressive_iterative_ot_evolve_focused(
                 child_model, dad.policy, mom.policy, args.distill_pt, env=env,
                 n_rounds=args.progressive_n_rounds,
+                distill_epochs=args.progressive_distill_epochs,
+                distill_lr=args.progressive_distill_lr,
                 final_finetune_steps=args.progressive_steps_per_round,
                 max_stages=args.progressive_max_stages,
                 ot_frac=args.ot_frac,
@@ -6570,6 +7095,19 @@ if __name__ == "__main__":
             cloudpickle.dump(child_model.policy, f)
         print(f"\n✅ 已儲存融合模型：{out_path}")
         env.close()
+
+    elif args.pair_sweep:
+        pair_sweep_inter_ot(
+            parent_dir=args.pair_sweep_parent_dir,
+            out_dir=args.pair_sweep_out,
+            include_reverse=not args.pair_sweep_no_reverse,
+            workers=args.pair_sweep_workers,
+            eval_episodes=args.pair_sweep_eval_episodes,
+            distill_frac=args.pair_sweep_distill_frac,
+            shard_index=int(args.pair_sweep_shard.split("/")[0]),
+            num_shards=int(args.pair_sweep_shard.split("/")[1]),
+            summarize_only=args.pair_sweep_summarize,
+        )
 
     else:
         parser.print_help()
